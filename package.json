@@ -1,24 +1,22 @@
 {
   "name": "kronex-bots",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx src/index.ts",
-    "bot:fill": "tsx src/orderbook-fill-bot.ts",
-    "bot:random": "tsx src/random-market-bot.ts",
-    "bot:range-fill": "tsx src/range-fill-bot.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "start": "npm run build && node dist/src/index.js",
+    "test": "npm run build && node --test dist/test/*.js",
+    "check": "npm run build && node --test dist/test/*.js"
   },
   "dependencies": {
-    "dotenv": "^16.4.7",
-    "socket.io-client": "^4.8.3"
+    "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
-    "@types/node": "^20.11.30",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.3"
+    "@types/node": "^24.0.14",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

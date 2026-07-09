@@ -1,4 +1,6 @@
-node_modules
-dist
+node_modules/
+dist/
+logs/*.jsonl
+coverage/
 .env
-*.log
+.DS_Store
