@@ -27,7 +27,7 @@ const getState = (): BotStateView => ({
 const bot = createBot(botKind);
 bot.start();
 
-void logger.log("bot_process_started", { botKind });
+// void logger.log("bot_process_started", { botKind });
 console.log(`[${botKind}] started pid=${process.pid}`);
 
 process.on("message", (message: unknown) => {
@@ -100,6 +100,6 @@ function parseMessage(message: unknown): BotProcessMessage | null {
 
 async function shutdown(reason: string): Promise<void> {
   bot.stop();
-  await logger.log("bot_process_stopped", { botKind, reason });
+  // await logger.log("bot_process_stopped", { botKind, reason });
   process.exit(0);
 }

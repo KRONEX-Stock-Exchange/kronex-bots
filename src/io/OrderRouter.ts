@@ -20,14 +20,14 @@ export class OrderRouter {
   ) {}
 
   async route(order: OrderDraft, snapshot: MarketSnapshot, fairPrice: number): Promise<ApiOrderResponse | null> {
-    await this.logger.log("order_created", this.logPayload(order, snapshot, fairPrice));
+    // await this.logger.log("order_created", this.logPayload(order, snapshot, fairPrice));
     const validation = this.validate(order, snapshot);
 
     if (!validation.valid) {
-      await this.logger.log("order_skipped", {
-        ...this.logPayload(order, snapshot, fairPrice),
-        reason: validation.reason
-      });
+      // await this.logger.log("order_skipped", {
+      //   ...this.logPayload(order, snapshot, fairPrice),
+      //   reason: validation.reason
+      // });
       return null;
     }
 
@@ -37,11 +37,11 @@ export class OrderRouter {
       payload: validation.payload
     });
 
-    await this.logger.log(response.ok ? "order_sent" : "order_rejected", {
-      ...this.logPayload(order, snapshot, fairPrice),
-      status: response.status,
-      responseBody: response.body
-    });
+    // await this.logger.log(response.ok ? "order_sent" : "order_rejected", {
+    //   ...this.logPayload(order, snapshot, fairPrice),
+    //   status: response.status,
+    //   responseBody: response.body
+    // });
 
     return response;
   }

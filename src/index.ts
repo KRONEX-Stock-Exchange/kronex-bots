@@ -55,15 +55,15 @@ class KronexBotRoot {
     this.startTimers();
     this.broadcastState();
 
-    await this.logger.log("root_started", {
-      stockId: this.config.stockId,
-      initialPrice,
-      fairPrice: this.fairPriceWorker.value,
-      fairPriceEventIntervalMs: this.config.fairPriceEvent.intervalMs,
-      fairPriceEventMinRatePct: this.config.fairPriceEvent.minRatePct,
-      fairPriceEventMaxRatePct: this.config.fairPriceEvent.maxRatePct,
-      botCount: this.children.size
-    });
+    // await this.logger.log("root_started", {
+    //   stockId: this.config.stockId,
+    //   initialPrice,
+    //   fairPrice: this.fairPriceWorker.value,
+    //   fairPriceEventIntervalMs: this.config.fairPriceEvent.intervalMs,
+    //   fairPriceEventMinRatePct: this.config.fairPriceEvent.minRatePct,
+    //   fairPriceEventMaxRatePct: this.config.fairPriceEvent.maxRatePct,
+    //   botCount: this.children.size
+    // });
     console.log(`[KronexBotRoot] running stockId=${this.config.stockId} bots=${this.children.size}`);
   }
 
@@ -85,7 +85,7 @@ class KronexBotRoot {
       }
     }, 1_000).unref();
 
-    await this.logger.log("root_stopped", { reason });
+    // await this.logger.log("root_stopped", { reason });
   }
 
   private spawnBots(): void {
@@ -99,7 +99,7 @@ class KronexBotRoot {
 
       this.children.set(kind, child);
       child.on("exit", (code, signal) => {
-        void this.logger.log("bot_process_exited", { botKind: kind, code, signal });
+        // void this.logger.log("bot_process_exited", { botKind: kind, code, signal });
       });
     }
   }
@@ -113,7 +113,7 @@ class KronexBotRoot {
 
       const update = this.fairPriceWorker.update(currentPrice);
       this.latestFairPriceUpdate = update;
-      void this.logger.log("fair_price_updated", { ...update });
+      // void this.logger.log("fair_price_updated", { ...update });
       this.broadcastState();
     }, 500);
 
@@ -121,7 +121,7 @@ class KronexBotRoot {
       const update = this.fairPriceEventWorker.update(this.fairPriceWorker.value);
       this.fairPriceWorker.replaceValue(update.fairPrice);
       this.latestFairPriceUpdate = update;
-      void this.logger.log("fair_price_event_updated", { ...update });
+      // void this.logger.log("fair_price_event_updated", { ...update });
       console.log(
         `[FairPriceEventWorker] eventRate=${update.eventRatePct.toFixed(4)}% fairPrice=${update.previousFairPrice.toFixed(2)}->${update.fairPrice.toFixed(2)} fairPriceChange=${this.formatSigned(update.fairPriceChange, 2)} fairPriceChangePct=${this.formatSigned(update.fairPriceChangePct, 4)}%`
       );
