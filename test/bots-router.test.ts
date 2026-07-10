@@ -19,11 +19,15 @@ function config(overrides: Partial<RuntimeConfig> = {}): RuntimeConfig {
     wsUrl: "ws://localhost:3001/stock",
     accessToken: "token",
     logFilePath: "/tmp/kronex-bots-test.jsonl",
-    consoleSummaryIntervalMs: 5_000,
-    hardMaxOrderNotional: 10_000_000,
+    orderSizing: {
+      referencePrice: 7_500,
+      decayExponent: 0.3,
+      hardMaxNotional: 10_000_000
+    },
     fairPrice: {
-      randomDeltaMin: -100,
-      randomDeltaMax: 100
+      intervalMs: 500,
+      randomDeltaMinPct: -0.56,
+      randomDeltaMaxPct: 0.56
     },
     fairPriceEvent: {
       intervalMs: 30_000,
@@ -44,18 +48,21 @@ function config(overrides: Partial<RuntimeConfig> = {}): RuntimeConfig {
       noiseTaker: {
         minIntervalMs: 100,
         maxIntervalMs: 350,
-        minNotional: 1,
-        maxNotional: 1_500_000
+        minNotional: 7_500,
+        maxNotional: 1_500_000,
+        minSideProbabilityPct: 10,
+        maxSideProbabilityPct: 90,
+        fullBiasDivergencePct: 5
       },
       momentum: {
         intervalMs: 450,
-        minNotional: 1,
+        minNotional: 7_500,
         maxNotional: 2_500_000
       },
       meanReversion: {
         minIntervalMs: 450,
         maxIntervalMs: 850,
-        minNotional: 1,
+        minNotional: 7_500,
         maxNotional: 5_000_000
       }
     },
@@ -102,7 +109,7 @@ test("market maker creates one prioritized limit order for an empty quote level"
   assert.equal(order.side, OrderSide.BUY);
   assert.equal(order.price, 9_990);
   assert.ok(order.quantity >= 1);
-  assert.ok(order.quantity * order.referencePrice <= 10_000_000);
+  assert.ok(order.quantity * order.referencePrice <= 10_900_000);
 });
 
 test("market maker fills even when the order book is completely empty", () => {
@@ -134,9 +141,30 @@ test("market maker returns no order until it has a current price", () => {
 test("noise taker computes documented buy probability clamps", () => {
   const taker = new NoiseTakerBot(config(), fakeRouter, () => ({ snapshot: null, fairPrice: null }), () => 0);
 
-  assert.equal(taker.buyProbabilityPct(10_000, 11_000), 90);
-  assert.equal(taker.buyProbabilityPct(10_000, 9_000), 10);
+  assert.equal(taker.buyProbabilityPct(10_000, 10_000), 50);
+  assert.equal(taker.buyProbabilityPct(9_750, 10_000), 70);
+  assert.equal(taker.buyProbabilityPct(9_500, 10_000), 90);
+  assert.equal(taker.buyProbabilityPct(9_000, 10_000), 90);
+  assert.equal(taker.buyProbabilityPct(10_250, 10_000), 30);
+  assert.equal(taker.buyProbabilityPct(10_500, 10_000), 10);
+  assert.equal(taker.buyProbabilityPct(11_000, 10_000), 10);
   assert.equal(taker.createOrder(snapshot(), 11_000)?.side, OrderSide.BUY);
+});
+
+test("noise taker side probability follows configured min max and full bias divergence", () => {
+  const runtimeConfig = config();
+  runtimeConfig.bots.noiseTaker = {
+    ...runtimeConfig.bots.noiseTaker,
+    minSideProbabilityPct: 20,
+    maxSideProbabilityPct: 80,
+    fullBiasDivergencePct: 10
+  };
+  const taker = new NoiseTakerBot(runtimeConfig, fakeRouter, () => ({ snapshot: null, fairPrice: null }), () => 0);
+
+  assert.equal(taker.buyProbabilityPct(9_500, 10_000), 65);
+  assert.equal(taker.buyProbabilityPct(10_500, 10_000), 35);
+  assert.equal(taker.buyProbabilityPct(9_000, 10_000), 80);
+  assert.equal(taker.buyProbabilityPct(11_000, 10_000), 20);
 });
 
 test("noise taker order size follows configured min and max notional", () => {
@@ -152,6 +180,31 @@ test("noise taker order size follows configured min and max notional", () => {
   assert.ok(order);
   assert.equal(order.quantity, 3);
   assert.equal(order.quantity * order.referencePrice, 30_000);
+});
+
+test("high priced orders decay smoothly instead of keeping low-price share count", () => {
+  const maker = new MarketMakerBot(config(), fakeRouter, () => ({ snapshot: null, fairPrice: null }), () => 0);
+  const order = maker.createOrder(snapshot({ lastPrice: 3_000_000, hasOrderBook: false, bids: [], asks: [] }), 3_100_000);
+
+  assert.ok(order);
+  assert.equal(order.quantity, 4);
+
+  const router = new OrderRouter(config(), fakeApiClient, fakeLogger);
+  const tooManyHighPriceShares = createOrderDraft({
+    stockId: 1,
+    botKind: BotKind.NOISE_TAKER,
+    side: OrderSide.BUY,
+    orderType: OrderType.MARKET,
+    price: 3_000_000,
+    quantity: 21,
+    referencePrice: 3_000_000,
+    reason: "too_many_high_price_shares"
+  });
+
+  assert.deepEqual(router.validate(tooManyHighPriceShares, snapshot({ lastPrice: 3_000_000 })), {
+    valid: false,
+    reason: "hard_notional_limit_exceeded"
+  });
 });
 
 test("momentum detects thirty-step trends and respects fair price direction", () => {
@@ -219,7 +272,7 @@ test("order router rejects mismatched bot order type and hard cap overflow", () 
     side: OrderSide.BUY,
     orderType: OrderType.MARKET,
     price: 10_000,
-    quantity: 1_001,
+    quantity: 1_334,
     referencePrice: 10_000,
     reason: "too_large"
   });

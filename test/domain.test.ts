@@ -3,7 +3,14 @@ import test from "node:test";
 import { OrderSide } from "../src/constants.js";
 import { FairPriceEventWorker } from "../src/domain/fairPriceEvent.js";
 import { FairPriceWorker } from "../src/domain/fairPrice.js";
-import { hardMaxNotionalFromEnv, quantityForNotional, randomTargetNotional } from "../src/domain/orderSizing.js";
+import {
+  hardMaxNotionalFromEnv,
+  maxOrderNotionalForReferencePrice,
+  normalizeDecayExponent,
+  quantityForNotional,
+  randomTargetNotional,
+  scaledNotionalForReferencePrice
+} from "../src/domain/orderSizing.js";
 import {
   getTickSize,
   isAlignedToTick,
@@ -37,35 +44,57 @@ test("market maker quote ladders are built around the current price", () => {
 });
 
 test("fair price moves every update and never falls below one won", () => {
-  const worker = new FairPriceWorker(() => 0);
+  const worker = new FairPriceWorker({ intervalMs: 500, randomDeltaMinPct: -200, randomDeltaMaxPct: -200 }, () => 0);
   worker.initialize(50);
   const update = worker.update(50);
 
-  assert.equal(update.randomDelta, -100);
-  assert.ok(update.fairPrice >= 1);
-  assert.equal(update.corrected, true);
+  assert.equal(update.randomDeltaPct, -200);
+  assert.equal(update.fairPrice, 1);
 });
 
-test("fair price is corrected ten percent toward current price past thirty percent divergence", () => {
-  const worker = new FairPriceWorker(() => 0.5);
+test("fair price is not corrected toward current price past thirty percent divergence", () => {
+  const worker = new FairPriceWorker({ intervalMs: 500, randomDeltaMinPct: 100, randomDeltaMaxPct: 100 }, () => 0);
   worker.initialize(2_000);
   const update = worker.update(1_000);
 
-  assert.equal(update.randomDelta, 0);
-  assert.equal(update.corrected, true);
-  assert.equal(update.fairPrice, 1_900);
-  assert.equal(update.fairPriceChange, -100);
-  assert.equal(update.fairPriceChangePct, -5);
+  assert.equal(update.randomDeltaPct, 100);
+  assert.equal(update.fairPrice, 4_000);
+  assert.equal(update.fairPriceChange, 2_000);
+  assert.equal(update.fairPriceChangePct, 100);
+  assert.equal(update.divergencePct, 300);
 });
 
-test("fair price random delta follows configured min and max", () => {
-  const minWorker = new FairPriceWorker({ randomDeltaMin: -20, randomDeltaMax: 40 }, () => 0);
+test("fair price random delta percent follows configured min and max", () => {
+  const minWorker = new FairPriceWorker({ intervalMs: 500, randomDeltaMinPct: -20, randomDeltaMaxPct: 40 }, () => 0);
   minWorker.initialize(1_000);
-  assert.equal(minWorker.update(1_000).randomDelta, -20);
+  const minUpdate = minWorker.update(1_000);
+  assert.equal(minUpdate.randomDeltaPct, -20);
+  assert.equal(minUpdate.fairPrice, 800);
 
-  const maxWorker = new FairPriceWorker({ randomDeltaMin: -20, randomDeltaMax: 40 }, () => 0.999);
+  const maxWorker = new FairPriceWorker({ intervalMs: 500, randomDeltaMinPct: -20, randomDeltaMaxPct: 40 }, () => 1);
   maxWorker.initialize(1_000);
-  assert.equal(maxWorker.update(1_000).randomDelta, 40);
+  const maxUpdate = maxWorker.update(1_000);
+  assert.equal(maxUpdate.randomDeltaPct, 40);
+  assert.equal(maxUpdate.fairPrice, 1_400);
+});
+
+test("fair price random delta percent is applied to previous fair price", () => {
+  const worker = new FairPriceWorker({ intervalMs: 500, randomDeltaMinPct: 0.56, randomDeltaMaxPct: 0.56 }, () => 0);
+  worker.initialize(9_500);
+  const update = worker.update(10_000);
+
+  assert.equal(update.randomDeltaPct, 0.56);
+  assert.equal(update.fairPrice, 9_553.2);
+});
+
+test("fair price event move is preserved by the regular worker", () => {
+  const worker = new FairPriceWorker({ intervalMs: 500, randomDeltaMinPct: 0, randomDeltaMaxPct: 0 }, () => 0);
+  worker.initialize(1_000);
+  worker.replaceValue(1_200);
+  const update = worker.update(1_000);
+
+  assert.equal(update.fairPrice, 1_200);
+  assert.equal(update.fairPriceChange, 0);
 });
 
 test("fair price event worker applies configured percent range", () => {
@@ -94,29 +123,85 @@ test("fair price can be replaced by the event worker result", () => {
   assert.equal(worker.value, 1_400);
 });
 
-test("sizing enforces one share minimum while respecting the ten million hard cap", () => {
-  assert.equal(hardMaxNotionalFromEnv(30_000_000), 10_000_000);
+test("sizing enforces one share minimum while respecting decayed hard cap", () => {
+  const orderSizing = {
+    referencePrice: 7_500,
+    decayExponent: 0.3,
+    hardMaxNotional: 10_000_000
+  };
+
+  assert.equal(hardMaxNotionalFromEnv(-1), 10_000_000);
+  assert.equal(hardMaxNotionalFromEnv(20_000_000), 20_000_000);
   assert.equal(quantityForNotional({
     targetNotional: 500_000,
     referencePrice: 800_000,
-    hardMaxNotional: 10_000_000
+    orderSizing
   }), 1);
 
   assert.equal(quantityForNotional({
     targetNotional: 20_000_000,
     referencePrice: 3_000_000,
-    hardMaxNotional: 10_000_000
-  }), 3);
+    orderSizing
+  }), 6);
 });
 
-test("random target notional can become one share when the stock is above the strategy max", () => {
+test("order notional scales with reference price decay exponent", () => {
+  const orderSizing = {
+    referencePrice: 7_500,
+    decayExponent: 0.3,
+    hardMaxNotional: 10_000_000
+  };
+
+  assert.equal(Math.round(scaledNotionalForReferencePrice(5_000_000, 7_500, orderSizing)), 5_000_000);
+  assert.equal(Math.round(scaledNotionalForReferencePrice(5_000_000, 75_000, orderSizing)), 9_976_312);
+  assert.equal(Math.round(scaledNotionalForReferencePrice(5_000_000, 3_000_000, orderSizing)), 30_170_882);
+  assert.equal(Math.round(maxOrderNotionalForReferencePrice(3_000_000, orderSizing)), 60_341_763);
+  assert.equal(quantityForNotional({
+    targetNotional: 2_000_000_000,
+    referencePrice: 3_000_000,
+    orderSizing
+  }), 20);
+  assert.equal(normalizeDecayExponent(1.2), 0.3);
+});
+
+test("random target notional can become one share when scaled range is below one share", () => {
+  const orderSizing = {
+    referencePrice: 7_500,
+    decayExponent: 0.3,
+    hardMaxNotional: 10_000_000
+  };
   const target = randomTargetNotional({
-    minNotional: 3_000_000,
-    maxNotional: 5_000_000,
+    minNotional: 10_000,
+    maxNotional: 20_000,
     referencePrice: 7_000_000,
-    hardMaxNotional: 10_000_000,
+    orderSizing,
     rng: () => 0.3
   });
 
   assert.equal(target, 7_000_000);
+});
+
+test("random target notional scales with reference price decay", () => {
+  const orderSizing = {
+    referencePrice: 7_500,
+    decayExponent: 0.3,
+    hardMaxNotional: 10_000_000
+  };
+  const lowPriceTarget = randomTargetNotional({
+    minNotional: 1_500_000,
+    maxNotional: 1_500_000,
+    referencePrice: 7_500,
+    orderSizing,
+    rng: () => 0
+  });
+  const highPriceTarget = randomTargetNotional({
+    minNotional: 1_500_000,
+    maxNotional: 1_500_000,
+    referencePrice: 75_000,
+    orderSizing,
+    rng: () => 0
+  });
+
+  assert.equal(lowPriceTarget, 1_500_000);
+  assert.equal(highPriceTarget, 2_992_893);
 });

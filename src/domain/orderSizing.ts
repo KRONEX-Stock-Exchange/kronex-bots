@@ -1,5 +1,5 @@
 import { BotKind, STRATEGY_LIMITS, type OrderSide, type OrderType } from "../constants.js";
-import type { OrderDraft, Rng } from "../types.js";
+import type { OrderDraft, OrderSizingConfig, Rng } from "../types.js";
 import { randomInt } from "./math.js";
 
 let nextOrderSequence = 0;
@@ -13,22 +13,24 @@ export function randomTargetNotional({
   minNotional,
   maxNotional,
   referencePrice,
-  hardMaxNotional,
+  orderSizing,
   rng = Math.random
 }: {
   minNotional: number;
   maxNotional: number;
   referencePrice: number;
-  hardMaxNotional: number;
+  orderSizing: OrderSizingConfig;
   rng?: Rng;
 }): number | null {
-  if (!Number.isFinite(referencePrice) || referencePrice <= 0 || referencePrice > hardMaxNotional) {
+  if (!Number.isFinite(referencePrice) || referencePrice <= 0) {
     return null;
   }
 
-  const cappedMax = Math.min(maxNotional, hardMaxNotional);
-  const floor = Math.max(minNotional, referencePrice);
-  const ceiling = Math.max(cappedMax, referencePrice);
+  const hardMaxNotional = maxOrderNotionalForReferencePrice(referencePrice, orderSizing);
+  const scaledMinNotional = scaledNotionalForReferencePrice(minNotional, referencePrice, orderSizing);
+  const scaledMaxNotional = scaledNotionalForReferencePrice(Math.min(maxNotional, orderSizing.hardMaxNotional), referencePrice, orderSizing);
+  const floor = Math.max(scaledMinNotional, referencePrice);
+  const ceiling = Math.max(scaledMaxNotional, referencePrice);
   const boundedCeiling = Math.min(ceiling, hardMaxNotional);
 
   if (floor >= boundedCeiling) {
@@ -41,16 +43,17 @@ export function randomTargetNotional({
 export function quantityForNotional({
   targetNotional,
   referencePrice,
-  hardMaxNotional
+  orderSizing
 }: {
   targetNotional: number;
   referencePrice: number;
-  hardMaxNotional: number;
+  orderSizing: OrderSizingConfig;
 }): number {
   if (!Number.isFinite(referencePrice) || referencePrice <= 0) {
     return 0;
   }
 
+  const hardMaxNotional = maxOrderNotionalForReferencePrice(referencePrice, orderSizing);
   const maxQuantity = Math.floor(hardMaxNotional / referencePrice);
   if (maxQuantity < 1) {
     return 0;
@@ -80,5 +83,31 @@ export function hardMaxNotionalFromEnv(value: number): number {
     return STRATEGY_LIMITS.hardMaxNotional;
   }
 
-  return Math.min(value, STRATEGY_LIMITS.hardMaxNotional);
+  return value;
+}
+
+export function scaledNotionalForReferencePrice(baseNotional: number, referencePrice: number, orderSizing: OrderSizingConfig): number {
+  if (
+    !Number.isFinite(baseNotional) ||
+    baseNotional <= 0 ||
+    !Number.isFinite(referencePrice) ||
+    referencePrice <= 0 ||
+    !Number.isFinite(orderSizing.referencePrice) ||
+    orderSizing.referencePrice <= 0
+  ) {
+    return 0;
+  }
+
+  const exponent = normalizeDecayExponent(orderSizing.decayExponent);
+  return baseNotional * ((referencePrice / orderSizing.referencePrice) ** exponent);
+}
+
+export function maxOrderNotionalForReferencePrice(referencePrice: number, orderSizing: OrderSizingConfig): number {
+  return Math.max(referencePrice, scaledNotionalForReferencePrice(orderSizing.hardMaxNotional, referencePrice, orderSizing));
+}
+
+export function normalizeDecayExponent(value: number): number {
+  return Number.isFinite(value) && value >= 0 && value <= 1
+    ? value
+    : STRATEGY_LIMITS.decayExponent;
 }

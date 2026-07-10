@@ -22,21 +22,26 @@ export const OrderType = {
 export type OrderType = (typeof OrderType)[keyof typeof OrderType];
 
 export const STRATEGY_LIMITS = {
+  referencePrice: 7_500,
+  decayExponent: 0.3,
   hardMaxNotional: 10_000_000,
   marketMaker: {
     minNotional: 2_000_000,
     maxNotional: 10_000_000
   },
   noiseTaker: {
-    minNotional: 1,
-    maxNotional: 1_500_000
+    minNotional: 7_500,
+    maxNotional: 1_500_000,
+    minSideProbabilityPct: 10,
+    maxSideProbabilityPct: 90,
+    fullBiasDivergencePct: 5
   },
   momentum: {
-    minNotional: 1,
+    minNotional: 7_500,
     maxNotional: 2_500_000
   },
   meanReversion: {
-    minNotional: 1,
+    minNotional: 7_500,
     maxNotional: 5_000_000
   }
 } as const;

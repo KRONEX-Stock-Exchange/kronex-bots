@@ -13,14 +13,27 @@ export interface NotionalRangeConfig {
   maxNotional: number;
 }
 
+export interface OrderSizingConfig {
+  referencePrice: number;
+  decayExponent: number;
+  hardMaxNotional: number;
+}
+
 export interface IntervalRangeConfig {
   minIntervalMs: number;
   maxIntervalMs: number;
 }
 
+export interface SideProbabilityConfig {
+  minSideProbabilityPct: number;
+  maxSideProbabilityPct: number;
+  fullBiasDivergencePct: number;
+}
+
 export interface FairPriceConfig {
-  randomDeltaMin: number;
-  randomDeltaMax: number;
+  intervalMs: number;
+  randomDeltaMinPct: number;
+  randomDeltaMaxPct: number;
 }
 
 export interface FairPriceEventConfig {
@@ -35,8 +48,7 @@ export interface RuntimeConfig {
   wsUrl: string;
   accessToken: string;
   logFilePath: string;
-  consoleSummaryIntervalMs: number;
-  hardMaxOrderNotional: number;
+  orderSizing: OrderSizingConfig;
   fairPrice: FairPriceConfig;
   fairPriceEvent: FairPriceEventConfig;
   accounts: {
@@ -48,7 +60,7 @@ export interface RuntimeConfig {
       checkIntervalMs: number;
       orderIntervalMs: number;
     };
-    noiseTaker: NotionalRangeConfig & IntervalRangeConfig;
+    noiseTaker: NotionalRangeConfig & IntervalRangeConfig & SideProbabilityConfig;
     momentum: NotionalRangeConfig & {
       intervalMs: number;
     };

@@ -1,4 +1,4 @@
-import { randomInt } from "./math.js";
+import { randomNumber } from "./math.js";
 import type { FairPriceConfig, Rng } from "../types.js";
 
 export interface FairPriceUpdate {
@@ -7,9 +7,8 @@ export interface FairPriceUpdate {
   fairPriceChange: number;
   fairPriceChangePct: number;
   currentPrice: number;
-  randomDelta: number;
+  randomDeltaPct: number;
   divergencePct: number;
-  corrected: boolean;
 }
 
 export class FairPriceWorker {
@@ -17,9 +16,9 @@ export class FairPriceWorker {
   private readonly config: FairPriceConfig;
   private readonly rng: Rng;
 
-  constructor(configOrRng: FairPriceConfig | Rng = { randomDeltaMin: -100, randomDeltaMax: 100 }, rng: Rng = Math.random) {
+  constructor(configOrRng: FairPriceConfig | Rng = { intervalMs: 500, randomDeltaMinPct: -0.56, randomDeltaMaxPct: 0.56 }, rng: Rng = Math.random) {
     if (typeof configOrRng === "function") {
-      this.config = { randomDeltaMin: -100, randomDeltaMax: 100 };
+      this.config = { intervalMs: 500, randomDeltaMinPct: -0.56, randomDeltaMaxPct: 0.56 };
       this.rng = configOrRng;
       return;
     }
@@ -54,19 +53,8 @@ export class FairPriceWorker {
 
   update(currentPrice: number): FairPriceUpdate {
     const previousFairPrice = this.value;
-    const randomDelta = randomInt(this.config.randomDeltaMin, this.config.randomDeltaMax, this.rng);
-    let nextFairPrice = Math.max(1, previousFairPrice + randomDelta);
-    let corrected = false;
-
-    if (Number.isFinite(currentPrice) && currentPrice > 0) {
-      const divergence = (nextFairPrice - currentPrice) / currentPrice;
-      if (Math.abs(divergence) > 0.3) {
-        nextFairPrice += (currentPrice - nextFairPrice) * 0.1;
-        corrected = true;
-      }
-    }
-
-    nextFairPrice = Math.max(1, nextFairPrice);
+    const randomDeltaPct = randomNumber(this.config.randomDeltaMinPct, this.config.randomDeltaMaxPct, this.rng);
+    const nextFairPrice = Math.max(1, previousFairPrice * (1 + randomDeltaPct / 100));
     this.fairPrice = nextFairPrice;
     const fairPriceChange = nextFairPrice - previousFairPrice;
 
@@ -76,19 +64,19 @@ export class FairPriceWorker {
       fairPriceChange,
       fairPriceChangePct: previousFairPrice > 0 ? (fairPriceChange / previousFairPrice) * 100 : 0,
       currentPrice,
-      randomDelta,
+      randomDeltaPct,
       divergencePct: Number.isFinite(currentPrice) && currentPrice > 0
         ? ((nextFairPrice - currentPrice) / currentPrice) * 100
-        : 0,
-      corrected
+        : 0
     };
   }
 
   private normalizeConfig(config: FairPriceConfig): FairPriceConfig {
-    const min = Number.isFinite(config.randomDeltaMin) ? config.randomDeltaMin : -100;
-    const max = Number.isFinite(config.randomDeltaMax) ? config.randomDeltaMax : 100;
+    const intervalMs = Number.isFinite(config.intervalMs) && config.intervalMs > 0 ? config.intervalMs : 500;
+    const min = Number.isFinite(config.randomDeltaMinPct) ? config.randomDeltaMinPct : -0.56;
+    const max = Number.isFinite(config.randomDeltaMaxPct) ? config.randomDeltaMaxPct : 0.56;
     return min <= max
-      ? { randomDeltaMin: min, randomDeltaMax: max }
-      : { randomDeltaMin: max, randomDeltaMax: min };
+      ? { intervalMs, randomDeltaMinPct: min, randomDeltaMaxPct: max }
+      : { intervalMs, randomDeltaMinPct: max, randomDeltaMaxPct: min };
   }
 }

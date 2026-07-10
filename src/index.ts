@@ -12,6 +12,7 @@ import { MarketState } from "./market/MarketState.js";
 import type { KronexStock, RootStateMessage, RuntimeConfig } from "./types.js";
 
 type FairPriceMovement = {
+  fairPrice: number;
   fairPriceChange: number;
   fairPriceChangePct: number;
 };
@@ -27,8 +28,6 @@ class KronexBotRoot {
   private fairPriceTimer: ReturnType<typeof setInterval> | null = null;
   private fairPriceEventTimer: ReturnType<typeof setInterval> | null = null;
   private broadcastTimer: ReturnType<typeof setInterval> | null = null;
-  private summaryTimer: ReturnType<typeof setInterval> | null = null;
-  private latestFairPriceUpdate: FairPriceMovement | null = null;
 
   constructor(private readonly config: RuntimeConfig) {
     this.logger = new JsonlLogger(config.logFilePath);
@@ -112,38 +111,23 @@ class KronexBotRoot {
       }
 
       const update = this.fairPriceWorker.update(currentPrice);
-      this.latestFairPriceUpdate = update;
       // void this.logger.log("fair_price_updated", { ...update });
+      this.logFairPriceMovement("FairPriceWorker", currentPrice, update);
       this.broadcastState();
-    }, 500);
+    }, this.config.fairPrice.intervalMs);
 
     this.fairPriceEventTimer = setInterval(() => {
+      const snapshot = this.marketState.getSnapshot();
       const update = this.fairPriceEventWorker.update(this.fairPriceWorker.value);
       this.fairPriceWorker.replaceValue(update.fairPrice);
-      this.latestFairPriceUpdate = update;
       // void this.logger.log("fair_price_event_updated", { ...update });
-      console.log(
-        `[FairPriceEventWorker] eventRate=${update.eventRatePct.toFixed(4)}% fairPrice=${update.previousFairPrice.toFixed(2)}->${update.fairPrice.toFixed(2)} fairPriceChange=${this.formatSigned(update.fairPriceChange, 2)} fairPriceChangePct=${this.formatSigned(update.fairPriceChangePct, 4)}%`
-      );
+      this.logFairPriceMovement("FairPriceEventWorker", snapshot.lastPrice, update);
       this.broadcastState();
     }, this.config.fairPriceEvent.intervalMs);
 
     this.broadcastTimer = setInterval(() => {
       this.broadcastState();
     }, 100);
-
-    this.summaryTimer = setInterval(() => {
-      const snapshot = this.marketState.getSnapshot();
-      const fairPriceChange = this.latestFairPriceUpdate
-        ? `${this.latestFairPriceUpdate.fairPriceChange >= 0 ? "+" : ""}${this.latestFairPriceUpdate.fairPriceChange.toFixed(2)}`
-        : "n/a";
-      const fairPriceChangePct = this.latestFairPriceUpdate
-        ? `${this.latestFairPriceUpdate.fairPriceChangePct >= 0 ? "+" : ""}${this.latestFairPriceUpdate.fairPriceChangePct.toFixed(4)}%`
-        : "n/a";
-      console.log(
-        `[KronexBotRoot] lastPrice=${snapshot.lastPrice ?? "n/a"} fairPrice=${this.fairPriceWorker.value.toFixed(2)} fairPriceChange=${fairPriceChange} fairPriceChangePct=${fairPriceChangePct}`
-      );
-    }, this.config.consoleSummaryIntervalMs);
   }
 
   private clearTimers(): void {
@@ -160,11 +144,6 @@ class KronexBotRoot {
     if (this.broadcastTimer) {
       clearInterval(this.broadcastTimer);
       this.broadcastTimer = null;
-    }
-
-    if (this.summaryTimer) {
-      clearInterval(this.summaryTimer);
-      this.summaryTimer = null;
     }
   }
 
@@ -197,6 +176,12 @@ class KronexBotRoot {
 
   private formatSigned(value: number, fractionDigits: number): string {
     return `${value >= 0 ? "+" : ""}${value.toFixed(fractionDigits)}`;
+  }
+
+  private logFairPriceMovement(source: "FairPriceWorker" | "FairPriceEventWorker", lastPrice: number | null, update: FairPriceMovement): void {
+    console.log(
+      `[${source}] lastPrice=${lastPrice ?? "n/a"} fairPrice=${update.fairPrice.toFixed(2)} fairPriceChange=${this.formatSigned(update.fairPriceChange, 2)} fairPriceChangePct=${this.formatSigned(update.fairPriceChangePct, 4)}%`
+    );
   }
 }
 

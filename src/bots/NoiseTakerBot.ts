@@ -57,7 +57,17 @@ export class NoiseTakerBot implements BotRunner {
 
   buyProbabilityPct(currentPrice: number, fairPrice: number): number {
     const divergencePct = ((fairPrice - currentPrice) / fairPrice) * 100;
-    return clamp(50 + divergencePct * 8, 10, 90);
+    const {
+      minSideProbabilityPct,
+      maxSideProbabilityPct,
+      fullBiasDivergencePct
+    } = this.config.bots.noiseTaker;
+    const biasRatio = clamp(divergencePct / fullBiasDivergencePct, -1, 1);
+    const buyProbability = biasRatio >= 0
+      ? 50 + biasRatio * (maxSideProbabilityPct - 50)
+      : 50 + biasRatio * (50 - minSideProbabilityPct);
+
+    return clamp(buyProbability, minSideProbabilityPct, maxSideProbabilityPct);
   }
 
   private async tick(): Promise<void> {

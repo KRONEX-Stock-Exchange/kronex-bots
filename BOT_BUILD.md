@@ -7,13 +7,11 @@ API, WEBSOCKET 요청 방법은 `BOT_REBUILD_REFERENCE.md` 문서 참조
 
 FairPrice는 현재 가격과 관련이 없고 봇들이 판단하는 그 주식의 가치이다.
 
-FairPrice는 워커가 **500ms마다** 기존 값에서 **-100 ~ +100** 사이의 랜덤한 정수만큼 변동한다.
+FairPrice는 일반 워커가 `BOT_FAIR_INTERVAL_MS`마다 이전 FairPrice 기준 **-0.56% ~ +0.56%** 사이의 랜덤한 비율만큼 변동한다.
 
 FairPrice 이벤트 워커는 일반 FairPrice 워커와 별개로 작동하며, 기본 **30초마다** 기존 FairPrice를 **-40% ~ +40%** 범위 안에서 크게 변동시킨다.
 
 FairPrice는 **최소 1원 미만으로 내려가지 않는다.**
-
-FairPrice는 변동 후 현재가와의 괴리율이 **±30%를 초과할 경우 현재가 방향으로 10%씩 보정한다.**
 
 아래 봇들은 이 값을 참고하여 주문을 낸다.
 
@@ -53,7 +51,7 @@ FairPrice는 변동 후 현재가와의 괴리율이 **±30%를 초과할 경우
 - FairPrice가 현재가보다 **0.5% 이상 낮으면** 매도 호가를 우선적으로 채운다.
 - FairPrice와 현재가 차이가 **±0.5% 미만**이면 매수와 매도를 동일한 우선순위로 채운다.
 - 기존 지정가 주문은 취소하거나 정정하지 않는다.
-- 주문 금액은 최소 200만원부터 최대 1000만원
+- 기준 주문금액은 `.env`의 `BOT_MM_MIN_ORDER_NOTIONAL`부터 `BOT_MM_MAX_ORDER_NOTIONAL` 사이에서 정한다.
 
 ---
 
@@ -76,7 +74,11 @@ FairPrice는 변동 후 현재가와의 괴리율이 **±30%를 초과할 경우
 - 매수 확률은 아래 식을 사용하여 계산한다.
 
 ```text
-매수 확률 = clamp(50 + (괴리율 × 8), 10, 90)
+편향비율 = clamp(괴리율 / BOT_NOISE_FULL_BIAS_DIVERGENCE_PCT, -1, 1)
+매수 확률 = 편향비율 >= 0
+  ? 50 + 편향비율 × (BOT_NOISE_MAX_SIDE_PROBABILITY_PCT - 50)
+  : 50 + 편향비율 × (50 - BOT_NOISE_MIN_SIDE_PROBABILITY_PCT)
+매수 확률 = clamp(매수 확률, BOT_NOISE_MIN_SIDE_PROBABILITY_PCT, BOT_NOISE_MAX_SIDE_PROBABILITY_PCT)
 ```
 
 - 매도 확률은 아래 식을 사용하여 계산한다.
@@ -87,7 +89,11 @@ FairPrice는 변동 후 현재가와의 괴리율이 **±30%를 초과할 경우
 
 - `clamp(value, min, max)`는 value가 min보다 작으면 min을, max보다 크면 max를 반환한다.
 - 주문 방향은 계산된 매수/매도 확률에 따라 랜덤하게 결정한다.
-- 주문 금액은 최소 해당 주식의 1주치 만큼의 가격부터 최대 150만원
+- 기본값 기준 현재가와 FairPrice 차이가 없으면 매수/매도 확률은 50%/50%이다.
+- 기본값 기준 현재가가 FairPrice보다 5% 이상 낮으면 매수 90%, 매도 10%이다.
+- 기본값 기준 현재가가 FairPrice보다 5% 이상 높으면 매수 10%, 매도 90%이다.
+- 그 사이는 괴리율에 따라 소수점 단위까지 점진적으로 변한다.
+- 기준 주문금액은 `.env`의 `BOT_NOISE_MIN_ORDER_NOTIONAL`부터 `BOT_NOISE_MAX_ORDER_NOTIONAL` 사이에서 정한다.
 
 ---
 
@@ -112,7 +118,7 @@ FairPrice는 변동 후 현재가와의 괴리율이 **±30%를 초과할 경우
 - 동일 가격도 연속으로 판단한다.
 - 상승 추세일 경우 FairPrice가 현재가보다 **0.5% 이상 높을 때만** 주문을 생성한다.
 - 하락 추세일 경우 FairPrice가 현재가보다 **0.5% 이상 낮을 때만** 주문을 생성한다.
-- 주문 금액은 최소 해당 주식의 1주치 만큼의 가격부터 최대 250만원
+- 기준 주문금액은 `.env`의 `BOT_MOMENTUM_MIN_ORDER_NOTIONAL`부터 `BOT_MOMENTUM_MAX_ORDER_NOTIONAL` 사이에서 정한다.
 
 ---
 
@@ -130,11 +136,13 @@ FairPrice는 변동 후 현재가와의 괴리율이 **±30%를 초과할 경우
 - 현재 체결가가 FairPrice보다 **5% 이상 낮으면** 시장가 매수 주문을 생성한다.
 - 괴리율의 절댓값이 **5% 미만**이면 주문을 생성하지 않는다.
 - 괴리율 = `(현재가 - FairPrice) / FairPrice * 100`
-- 주문 금액은 최소 해당 주식의 1주치 만큼의 가격부터 최대 500만원
+- 기준 주문금액은 `.env`의 `BOT_REVERSION_MIN_ORDER_NOTIONAL`부터 `BOT_REVERSION_MAX_ORDER_NOTIONAL` 사이에서 정한다.
 
 ### 공통 봇 규칙
 
-- 주문시 주문 금액이 1천만원 초과하는 주문은 생성하지 않는다.
+- 기준 주문금액은 `BOT_ORDER_REFERENCE_PRICE` 가격대에서의 주문금액을 의미한다.
+- 실제 주문금액은 `기준주문금액 * ((주문가격 / BOT_ORDER_REFERENCE_PRICE) ^ BOT_ORDER_PRICE_DECAY_EXPONENT)`로 계산한다.
+- 주가가 비싸질수록 주문금액은 완만하게 늘고, 주문 수량은 자연스럽게 줄어든다.
 - 주문 수량은 `floor(주문금액 / 주문가격)`으로 계산한다.
 - 계산된 주문 수량이 1주 미만일 경우 주문 금액을 해당 주식의 1주 가격으로 조정한 뒤 다시 수량을 계산한다.
 - 시장가 주문의 주문가격은 현재가를 사용한다.
@@ -142,10 +150,11 @@ FairPrice는 변동 후 현재가와의 괴리율이 **±30%를 초과할 경우
 
 ### 환경변수 튜닝
 
-- 봇별 주문 주기와 최소/최대 주문금액은 `.env`에서 조정한다.
+- 봇별 주문 주기와 최소/최대 기준 주문금액은 `.env`에서 조정한다.
+- 공통 주문금액 스케일: `BOT_ORDER_REFERENCE_PRICE`, `BOT_ORDER_PRICE_DECAY_EXPONENT`, `BOT_MAX_ORDER_NOTIONAL`
 - MarketMaker: `BOT_MM_CHECK_INTERVAL_MS`, `BOT_MM_ORDER_INTERVAL_MS`, `BOT_MM_MIN_ORDER_NOTIONAL`, `BOT_MM_MAX_ORDER_NOTIONAL`
-- NoiseTaker: `BOT_NOISE_MIN_INTERVAL_MS`, `BOT_NOISE_MAX_INTERVAL_MS`, `BOT_NOISE_MIN_ORDER_NOTIONAL`, `BOT_NOISE_MAX_ORDER_NOTIONAL`
+- NoiseTaker: `BOT_NOISE_MIN_INTERVAL_MS`, `BOT_NOISE_MAX_INTERVAL_MS`, `BOT_NOISE_MIN_ORDER_NOTIONAL`, `BOT_NOISE_MAX_ORDER_NOTIONAL`, `BOT_NOISE_MIN_SIDE_PROBABILITY_PCT`, `BOT_NOISE_MAX_SIDE_PROBABILITY_PCT`, `BOT_NOISE_FULL_BIAS_DIVERGENCE_PCT`
 - MomentumBot: `BOT_MOMENTUM_INTERVAL_MS`, `BOT_MOMENTUM_MIN_ORDER_NOTIONAL`, `BOT_MOMENTUM_MAX_ORDER_NOTIONAL`
 - MeanReversionBot: `BOT_REVERSION_MIN_INTERVAL_MS`, `BOT_REVERSION_MAX_INTERVAL_MS`, `BOT_REVERSION_MIN_ORDER_NOTIONAL`, `BOT_REVERSION_MAX_ORDER_NOTIONAL`
-- FairPrice: `BOT_FAIR_RANDOM_DELTA_MIN`, `BOT_FAIR_RANDOM_DELTA_MAX`, `BOT_FAIR_EVENT_INTERVAL_MS`, `BOT_FAIR_EVENT_RATE_MIN_PCT`, `BOT_FAIR_EVENT_RATE_MAX_PCT`
-- `BOT_MAX_ORDER_NOTIONAL`은 전체 주문 공통 상한이며 1천만원을 넘지 않도록 코드에서 다시 제한한다.
+- FairPrice: `BOT_FAIR_INTERVAL_MS`, `BOT_FAIR_RANDOM_DELTA_MIN`, `BOT_FAIR_RANDOM_DELTA_MAX`, `BOT_FAIR_EVENT_INTERVAL_MS`, `BOT_FAIR_EVENT_RATE_MIN_PCT`, `BOT_FAIR_EVENT_RATE_MAX_PCT`
+- `BOT_MAX_ORDER_NOTIONAL`은 기준가격에서의 전체 주문 공통 최대금액이다.

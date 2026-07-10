@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { STRATEGY_LIMITS } from "./constants.js";
-import { hardMaxNotionalFromEnv } from "./domain/orderSizing.js";
+import { hardMaxNotionalFromEnv, normalizeDecayExponent } from "./domain/orderSizing.js";
 import type { RuntimeConfig } from "./types.js";
 
 const ENV_FILE_PATH = ".env";
@@ -73,6 +73,22 @@ function numericRange(minValue: number, maxValue: number): { min: number; max: n
     : { min: maxValue, max: minValue };
 }
 
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function sideProbabilityConfig(
+  minValue: number,
+  maxValue: number,
+  fullBiasDivergencePct: number
+): { minSideProbabilityPct: number; maxSideProbabilityPct: number; fullBiasDivergencePct: number } {
+  return {
+    minSideProbabilityPct: clampNumber(minValue, 0, 50),
+    maxSideProbabilityPct: clampNumber(maxValue, 50, 100),
+    fullBiasDivergencePct: fullBiasDivergencePct > 0 ? fullBiasDivergencePct : STRATEGY_LIMITS.noiseTaker.fullBiasDivergencePct
+  };
+}
+
 loadEnvFile();
 
 export function loadConfig(): RuntimeConfig {
@@ -89,6 +105,11 @@ export function loadConfig(): RuntimeConfig {
     positiveNumberEnv("BOT_NOISE_MAX_ORDER_NOTIONAL", STRATEGY_LIMITS.noiseTaker.maxNotional),
     hardMaxOrderNotional
   );
+  const noiseTakerSideProbability = sideProbabilityConfig(
+    numberEnv("BOT_NOISE_MIN_SIDE_PROBABILITY_PCT", STRATEGY_LIMITS.noiseTaker.minSideProbabilityPct),
+    numberEnv("BOT_NOISE_MAX_SIDE_PROBABILITY_PCT", STRATEGY_LIMITS.noiseTaker.maxSideProbabilityPct),
+    numberEnv("BOT_NOISE_FULL_BIAS_DIVERGENCE_PCT", STRATEGY_LIMITS.noiseTaker.fullBiasDivergencePct)
+  );
   const momentumNotional = notionalRange(
     positiveNumberEnv("BOT_MOMENTUM_MIN_ORDER_NOTIONAL", STRATEGY_LIMITS.momentum.minNotional),
     positiveNumberEnv("BOT_MOMENTUM_MAX_ORDER_NOTIONAL", STRATEGY_LIMITS.momentum.maxNotional),
@@ -100,8 +121,8 @@ export function loadConfig(): RuntimeConfig {
     hardMaxOrderNotional
   );
   const fairPriceRandomDelta = numericRange(
-    numberEnv("BOT_FAIR_RANDOM_DELTA_MIN", -100),
-    numberEnv("BOT_FAIR_RANDOM_DELTA_MAX", 100)
+    numberEnv("BOT_FAIR_RANDOM_DELTA_MIN", -0.56),
+    numberEnv("BOT_FAIR_RANDOM_DELTA_MAX", 0.56)
   );
   const fairPriceEventRatePct = numericRange(
     numberEnv("BOT_FAIR_EVENT_RATE_MIN_PCT", -40),
@@ -114,11 +135,15 @@ export function loadConfig(): RuntimeConfig {
     wsUrl: stringEnv("KRONEX_WS_URL", "ws://localhost:3001/stock"),
     accessToken: stringEnv("BOT_ACCESS_TOKEN", ""),
     logFilePath: stringEnv("BOT_LOG_FILE", "logs/bot-events.jsonl"),
-    consoleSummaryIntervalMs: numberEnv("BOT_CONSOLE_SUMMARY_INTERVAL_MS", 5_000),
-    hardMaxOrderNotional,
+    orderSizing: {
+      referencePrice: positiveNumberEnv("BOT_ORDER_REFERENCE_PRICE", STRATEGY_LIMITS.referencePrice),
+      decayExponent: normalizeDecayExponent(numberEnv("BOT_ORDER_PRICE_DECAY_EXPONENT", STRATEGY_LIMITS.decayExponent)),
+      hardMaxNotional: hardMaxOrderNotional
+    },
     fairPrice: {
-      randomDeltaMin: fairPriceRandomDelta.min,
-      randomDeltaMax: fairPriceRandomDelta.max
+      intervalMs: positiveNumberEnv("BOT_FAIR_INTERVAL_MS", 500),
+      randomDeltaMinPct: fairPriceRandomDelta.min,
+      randomDeltaMaxPct: fairPriceRandomDelta.max
     },
     fairPriceEvent: {
       intervalMs: positiveNumberEnv("BOT_FAIR_EVENT_INTERVAL_MS", 30_000),
@@ -146,7 +171,8 @@ export function loadConfig(): RuntimeConfig {
           positiveNumberEnv("BOT_NOISE_MIN_INTERVAL_MS", 100),
           positiveNumberEnv("BOT_NOISE_MAX_INTERVAL_MS", 350)
         ),
-        ...noiseTakerNotional
+        ...noiseTakerNotional,
+        ...noiseTakerSideProbability
       },
       momentum: {
         intervalMs: positiveNumberEnv("BOT_MOMENTUM_INTERVAL_MS", 450),

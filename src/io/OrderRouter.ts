@@ -1,4 +1,5 @@
 import { ALLOWED_ORDER_TYPE_BY_BOT, OrderSide, OrderType } from "../constants.js";
+import { maxOrderNotionalForReferencePrice } from "../domain/orderSizing.js";
 import { isAlignedToTick } from "../domain/tickSize.js";
 import type {
   ApiOrderResponse,
@@ -86,7 +87,8 @@ export class OrderRouter {
     }
 
     const notional = order.quantity * order.referencePrice;
-    if (notional > this.config.hardMaxOrderNotional) {
+    const hardMaxNotional = maxOrderNotionalForReferencePrice(order.referencePrice, this.config.orderSizing);
+    if (notional > hardMaxNotional) {
       return { valid: false, reason: "hard_notional_limit_exceeded" };
     }
 

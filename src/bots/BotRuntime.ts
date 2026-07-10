@@ -61,7 +61,7 @@ export function createMarketOrder(input: {
     minNotional: input.minNotional,
     maxNotional: input.maxNotional,
     referencePrice,
-    hardMaxNotional: input.config.hardMaxOrderNotional,
+    orderSizing: input.config.orderSizing,
     rng: input.rng
   });
   if (targetNotional === null) {
@@ -71,7 +71,7 @@ export function createMarketOrder(input: {
   const quantity = quantityForNotional({
     targetNotional,
     referencePrice,
-    hardMaxNotional: input.config.hardMaxOrderNotional
+    orderSizing: input.config.orderSizing
   });
   if (quantity < 1) {
     return null;
@@ -101,7 +101,7 @@ export function createLimitOrder(input: {
     minNotional: input.config.bots.marketMaker.minNotional,
     maxNotional: input.config.bots.marketMaker.maxNotional,
     referencePrice: input.price,
-    hardMaxNotional: input.config.hardMaxOrderNotional,
+    orderSizing: input.config.orderSizing,
     rng: input.rng
   });
   if (targetNotional === null) {
@@ -111,7 +111,7 @@ export function createLimitOrder(input: {
   const quantity = quantityForNotional({
     targetNotional,
     referencePrice: input.price,
-    hardMaxNotional: input.config.hardMaxOrderNotional
+    orderSizing: input.config.orderSizing
   });
   if (quantity < 1) {
     return null;
