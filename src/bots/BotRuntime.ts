@@ -8,6 +8,7 @@ import {
   quantityForNotional,
   randomTargetNotional
 } from "../domain/orderSizing.js";
+import { hasPriceLimits, priceLimitSideBlockReason } from "../domain/priceLimits.js";
 import type { MarketSnapshot, OrderDraft, Rng, RuntimeConfig } from "../types.js";
 import type { OrderRouter } from "../io/OrderRouter.js";
 
@@ -32,7 +33,12 @@ export interface BotDeps {
 
 export function getReadyState(getState: BotStateGetter): { snapshot: MarketSnapshot; fairPrice: number } | null {
   const state = getState();
-  if (state.snapshot?.lastPrice === null || state.snapshot?.lastPrice === undefined || state.fairPrice === null) {
+  if (
+    state.snapshot?.lastPrice === null
+    || state.snapshot?.lastPrice === undefined
+    || state.fairPrice === null
+    || !hasPriceLimits(state.snapshot)
+  ) {
     return null;
   }
 
@@ -54,6 +60,14 @@ export function createMarketOrder(input: {
 }): OrderDraft | null {
   const referencePrice = input.snapshot.lastPrice;
   if (referencePrice === null) {
+    return null;
+  }
+
+  if (!hasPriceLimits(input.snapshot)) {
+    return null;
+  }
+
+  if (priceLimitSideBlockReason(input.side, input.snapshot) !== null) {
     return null;
   }
 
@@ -93,10 +107,15 @@ export function createLimitOrder(input: {
   config: RuntimeConfig;
   botKind: typeof BotKind.MARKET_MAKER;
   side: OrderSide;
+  snapshot: MarketSnapshot;
   price: number;
   reason: string;
   rng?: Rng;
 }): OrderDraft | null {
+  if (!hasPriceLimits(input.snapshot)) {
+    return null;
+  }
+
   const targetNotional = randomTargetNotional({
     minNotional: input.config.bots.marketMaker.minNotional,
     maxNotional: input.config.bots.marketMaker.maxNotional,

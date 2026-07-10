@@ -74,6 +74,8 @@ function snapshot(overrides: Partial<MarketSnapshot> = {}): MarketSnapshot {
   return {
     stockId: 1,
     lastPrice: 10_000,
+    upperLimitPrice: 100_000_000,
+    lowerLimitPrice: 1,
     bids: [{ price: 10_000, quantity: 1 }],
     asks: [{ price: 10_010, quantity: 1 }],
     priceHistory: Array.from({ length: 31 }, (_, index) => 9_700 + index * 10),
@@ -138,6 +140,43 @@ test("market maker returns no order until it has a current price", () => {
   assert.equal(maker.createOrder(snapshot({ lastPrice: null, hasOrderBook: false, bids: [], asks: [] }), 10_100), null);
 });
 
+test("market maker waits until price limits are known", () => {
+  const maker = new MarketMakerBot(config(), fakeRouter, () => ({ snapshot: null, fairPrice: null }), () => 0);
+  assert.equal(maker.createOrder(snapshot({
+    upperLimitPrice: null,
+    lowerLimitPrice: null,
+    hasOrderBook: false,
+    bids: [],
+    asks: []
+  }), 10_100), null);
+});
+
+test("market maker respects upper and lower price limit walls", () => {
+  const maker = new MarketMakerBot(config(), fakeRouter, () => ({ snapshot: null, fairPrice: null }), () => 0);
+
+  const upperLimitOrder = maker.createOrder(snapshot({
+    lastPrice: 20_000,
+    upperLimitPrice: 20_000,
+    lowerLimitPrice: 10_000,
+    hasOrderBook: false,
+    bids: [],
+    asks: []
+  }), 25_000);
+  assert.equal(upperLimitOrder?.side, OrderSide.SELL);
+  assert.equal(upperLimitOrder?.price, 20_000);
+
+  const lowerLimitOrder = maker.createOrder(snapshot({
+    lastPrice: 5_000,
+    upperLimitPrice: 10_000,
+    lowerLimitPrice: 5_000,
+    hasOrderBook: false,
+    bids: [],
+    asks: []
+  }), 4_000);
+  assert.equal(lowerLimitOrder?.side, OrderSide.BUY);
+  assert.equal(lowerLimitOrder?.price, 5_000);
+});
+
 test("noise taker computes documented buy probability clamps", () => {
   const taker = new NoiseTakerBot(config(), fakeRouter, () => ({ snapshot: null, fairPrice: null }), () => 0);
 
@@ -149,6 +188,22 @@ test("noise taker computes documented buy probability clamps", () => {
   assert.equal(taker.buyProbabilityPct(10_500, 10_000), 10);
   assert.equal(taker.buyProbabilityPct(11_000, 10_000), 10);
   assert.equal(taker.createOrder(snapshot(), 11_000)?.side, OrderSide.BUY);
+});
+
+test("market order bots skip sides blocked by price limits", () => {
+  const upperBuyTaker = new NoiseTakerBot(config(), fakeRouter, () => ({ snapshot: null, fairPrice: null }), () => 0);
+  assert.equal(upperBuyTaker.createOrder(snapshot({
+    lastPrice: 20_000,
+    upperLimitPrice: 20_000,
+    lowerLimitPrice: 10_000
+  }), 30_000), null);
+
+  const lowerSellTaker = new NoiseTakerBot(config(), fakeRouter, () => ({ snapshot: null, fairPrice: null }), () => 0.999);
+  assert.equal(lowerSellTaker.createOrder(snapshot({
+    lastPrice: 5_000,
+    upperLimitPrice: 10_000,
+    lowerLimitPrice: 5_000
+  }), 4_000), null);
 });
 
 test("noise taker side probability follows configured min max and full bias divergence", () => {
@@ -284,5 +339,95 @@ test("order router rejects mismatched bot order type and hard cap overflow", () 
   assert.deepEqual(router.validate(tooLarge, snapshot()), {
     valid: false,
     reason: "hard_notional_limit_exceeded"
+  });
+});
+
+test("order router rejects orders before price limits are known", () => {
+  const router = new OrderRouter(config(), fakeApiClient, fakeLogger);
+  const order = createOrderDraft({
+    stockId: 1,
+    botKind: BotKind.NOISE_TAKER,
+    side: OrderSide.BUY,
+    orderType: OrderType.MARKET,
+    price: 10_000,
+    quantity: 1,
+    referencePrice: 10_000,
+    reason: "limits_unknown"
+  });
+
+  assert.deepEqual(router.validate(order, snapshot({ upperLimitPrice: null, lowerLimitPrice: null })), {
+    valid: false,
+    reason: "price_limits_unknown"
+  });
+});
+
+test("order router rejects price limit violations and blocked limit sides", () => {
+  const router = new OrderRouter(config(), fakeApiClient, fakeLogger);
+  const upperSnapshot = snapshot({
+    lastPrice: 20_000,
+    upperLimitPrice: 20_000,
+    lowerLimitPrice: 10_000
+  });
+  const lowerSnapshot = snapshot({
+    lastPrice: 5_000,
+    upperLimitPrice: 10_000,
+    lowerLimitPrice: 5_000
+  });
+  const upperBuy = createOrderDraft({
+    stockId: 1,
+    botKind: BotKind.NOISE_TAKER,
+    side: OrderSide.BUY,
+    orderType: OrderType.MARKET,
+    price: 20_000,
+    quantity: 1,
+    referencePrice: 20_000,
+    reason: "upper_buy"
+  });
+  const lowerSell = createOrderDraft({
+    stockId: 1,
+    botKind: BotKind.NOISE_TAKER,
+    side: OrderSide.SELL,
+    orderType: OrderType.MARKET,
+    price: 5_000,
+    quantity: 1,
+    referencePrice: 5_000,
+    reason: "lower_sell"
+  });
+  const aboveUpper = createOrderDraft({
+    stockId: 1,
+    botKind: BotKind.MARKET_MAKER,
+    side: OrderSide.SELL,
+    orderType: OrderType.LIMIT,
+    price: 20_050,
+    quantity: 1,
+    referencePrice: 20_050,
+    reason: "above_upper"
+  });
+  const belowLower = createOrderDraft({
+    stockId: 1,
+    botKind: BotKind.MARKET_MAKER,
+    side: OrderSide.BUY,
+    orderType: OrderType.LIMIT,
+    price: 9_990,
+    quantity: 1,
+    referencePrice: 9_990,
+    reason: "below_lower"
+  });
+
+  assert.deepEqual(router.validate(upperBuy, upperSnapshot), {
+    valid: false,
+    reason: "upper_limit_buy_blocked"
+  });
+  assert.deepEqual(router.validate(lowerSell, lowerSnapshot), {
+    valid: false,
+    reason: "lower_limit_sell_blocked"
+  });
+  assert.deepEqual(router.validate(aboveUpper, upperSnapshot), {
+    valid: false,
+    reason: "price_above_upper_limit"
+  });
+  assert.deepEqual(router.validate(belowLower, upperSnapshot), {
+    valid: false,
+    reason: "price_below_lower_limit"
   });
 });

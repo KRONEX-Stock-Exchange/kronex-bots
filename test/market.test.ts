@@ -4,7 +4,7 @@ import { MarketState } from "../src/market/MarketState.js";
 
 test("market state initializes from stock price and keeps enough prices for thirty-step momentum", () => {
   const market = new MarketState(1);
-  market.initializeFromStock({ id: 1, price: "10000" });
+  market.initializeFromStock({ id: 1, price: "10000", upperLimit: "20000", lowerLimit: "5000" });
 
   for (let index = 0; index < 34; index += 1) {
     assert.equal(market.applyStockInfoUpdated({ data: { stockId: 1, lastPrice: 10_001 + index } }), true);
@@ -12,8 +12,39 @@ test("market state initializes from stock price and keeps enough prices for thir
 
   const snapshot = market.getSnapshot();
   assert.equal(snapshot.lastPrice, 10_034);
+  assert.equal(snapshot.upperLimitPrice, 20_000);
+  assert.equal(snapshot.lowerLimitPrice, 5_000);
   assert.equal(snapshot.priceHistory.length, 31);
   assert.deepEqual(snapshot.priceHistory.slice(0, 2), [10_004, 10_005]);
+});
+
+test("market state refreshes price limits from every stock info update", () => {
+  const market = new MarketState(1);
+  market.initializeFromStock({ id: 1, price: "10000", upperLimit: "20000", lowerLimit: "5000" });
+
+  assert.equal(market.applyStockInfoUpdated({
+    id: 1,
+    price: "10100",
+    upperLimit: "20200",
+    lowerLimit: "5050"
+  }), true);
+  assert.equal(market.getSnapshot().lastPrice, 10_100);
+  assert.equal(market.getSnapshot().upperLimitPrice, 20_200);
+  assert.equal(market.getSnapshot().lowerLimitPrice, 5_050);
+
+  assert.equal(market.applyStockInfoUpdated({ id: 1, price: "10200" }), true);
+  assert.equal(market.getSnapshot().lastPrice, 10_200);
+  assert.equal(market.getSnapshot().upperLimitPrice, 20_200);
+  assert.equal(market.getSnapshot().lowerLimitPrice, 5_050);
+
+  assert.equal(market.applyStockInfoUpdated({
+    id: 1,
+    upperLimit: "20400",
+    lowerLimit: "5100"
+  }), true);
+  assert.equal(market.getSnapshot().lastPrice, 10_200);
+  assert.equal(market.getSnapshot().upperLimitPrice, 20_400);
+  assert.equal(market.getSnapshot().lowerLimitPrice, 5_100);
 });
 
 test("market state parses nested order book updates and aggregates duplicate prices", () => {

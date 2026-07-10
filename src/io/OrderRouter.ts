@@ -1,5 +1,6 @@
 import { ALLOWED_ORDER_TYPE_BY_BOT, OrderSide, OrderType } from "../constants.js";
 import { maxOrderNotionalForReferencePrice } from "../domain/orderSizing.js";
+import { hasPriceLimits, priceLimitSideBlockReason, priceLimitViolation } from "../domain/priceLimits.js";
 import { isAlignedToTick } from "../domain/tickSize.js";
 import type {
   ApiOrderResponse,
@@ -37,6 +38,14 @@ export class OrderRouter {
       side: order.side,
       payload: validation.payload
     });
+
+    if (!response.ok) {
+      console.warn("[OrderRouter] order response rejected", {
+        ...this.logPayload(order, snapshot, fairPrice),
+        status: response.status,
+        responseBody: response.body
+      });
+    }
 
     // await this.logger.log(response.ok ? "order_sent" : "order_rejected", {
     //   ...this.logPayload(order, snapshot, fairPrice),
@@ -76,6 +85,10 @@ export class OrderRouter {
       return { valid: false, reason: "invalid_reference_price" };
     }
 
+    if (!hasPriceLimits(snapshot)) {
+      return { valid: false, reason: "price_limits_unknown" };
+    }
+
     if (order.orderType === OrderType.MARKET) {
       if (snapshot.lastPrice === null || order.price !== snapshot.lastPrice || order.referencePrice !== snapshot.lastPrice) {
         return { valid: false, reason: "market_price_must_equal_last_price" };
@@ -84,6 +97,16 @@ export class OrderRouter {
 
     if (order.orderType === OrderType.LIMIT && !isAlignedToTick(order.price)) {
       return { valid: false, reason: "limit_price_not_aligned_to_tick" };
+    }
+
+    const limitViolation = priceLimitViolation(order.price, snapshot);
+    if (limitViolation !== null) {
+      return { valid: false, reason: limitViolation };
+    }
+
+    const limitSideBlockReason = priceLimitSideBlockReason(order.side, snapshot);
+    if (limitSideBlockReason !== null) {
+      return { valid: false, reason: limitSideBlockReason };
     }
 
     const notional = order.quantity * order.referencePrice;

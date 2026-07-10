@@ -83,6 +83,8 @@ export interface OrderBookLevel {
 export interface MarketSnapshot {
   stockId: number;
   lastPrice: number | null;
+  upperLimitPrice: number | null;
+  lowerLimitPrice: number | null;
   bids: OrderBookLevel[];
   asks: OrderBookLevel[];
   priceHistory: number[];

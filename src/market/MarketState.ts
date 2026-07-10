@@ -5,6 +5,8 @@ import type { KronexStock, MarketSnapshot, OrderBookLevel } from "../types.js";
 export class MarketState {
   private static readonly priceHistoryLimit = 31;
   private lastPrice: number | null = null;
+  private upperLimitPrice: number | null = null;
+  private lowerLimitPrice: number | null = null;
   private bids: OrderBookLevel[] = [];
   private asks: OrderBookLevel[] = [];
   private priceHistory: number[] = [];
@@ -18,6 +20,7 @@ export class MarketState {
       throw new Error(`stockId=${this.stockId} has no valid initial price`);
     }
 
+    this.updatePriceLimits(stock);
     this.updateLastPrice(price);
   }
 
@@ -30,12 +33,18 @@ export class MarketState {
       return false;
     }
 
+    const priceLimitUpdated = this.updatePriceLimits(data);
     const price = this.extractPrice(data);
-    if (price === null) {
+    if (price === null && !priceLimitUpdated) {
       return false;
     }
 
-    this.updateLastPrice(price);
+    if (price !== null) {
+      this.updateLastPrice(price);
+    } else {
+      this.updatedAt = Date.now();
+    }
+
     return true;
   }
 
@@ -65,6 +74,8 @@ export class MarketState {
     return {
       stockId: this.stockId,
       lastPrice: this.lastPrice,
+      upperLimitPrice: this.upperLimitPrice,
+      lowerLimitPrice: this.lowerLimitPrice,
       bids: this.bids.map((level) => ({ ...level })),
       asks: this.asks.map((level) => ({ ...level })),
       priceHistory: [...this.priceHistory],
@@ -107,6 +118,58 @@ export class MarketState {
       toPositiveNumber(record.price) ??
       toPositiveNumber(record.closePrice) ??
       toPositiveNumber(record.tradePrice)
+    );
+  }
+
+  private updatePriceLimits(data: unknown): boolean {
+    const upperLimitPrice = this.extractUpperLimitPrice(data);
+    const lowerLimitPrice = this.extractLowerLimitPrice(data);
+    let updated = false;
+
+    if (upperLimitPrice !== null) {
+      this.upperLimitPrice = upperLimitPrice;
+      updated = true;
+    }
+
+    if (lowerLimitPrice !== null) {
+      this.lowerLimitPrice = lowerLimitPrice;
+      updated = true;
+    }
+
+    return updated;
+  }
+
+  private extractUpperLimitPrice(data: unknown): number | null {
+    const record = asRecord(data);
+    if (!record) {
+      return null;
+    }
+
+    return (
+      toPositiveNumber(record.upperLimit) ??
+      toPositiveNumber(record.upper_limit) ??
+      toPositiveNumber(record.upperLimitPrice) ??
+      toPositiveNumber(record.upperPrice) ??
+      toPositiveNumber(record.limitUpPrice) ??
+      toPositiveNumber(record.highLimitPrice) ??
+      toPositiveNumber(record.maxPrice)
+    );
+  }
+
+  private extractLowerLimitPrice(data: unknown): number | null {
+    const record = asRecord(data);
+    if (!record) {
+      return null;
+    }
+
+    return (
+      toPositiveNumber(record.lowerLimit) ??
+      toPositiveNumber(record.lower_limit) ??
+      toPositiveNumber(record.lowerLimitPrice) ??
+      toPositiveNumber(record.lowerPrice) ??
+      toPositiveNumber(record.limitDownPrice) ??
+      toPositiveNumber(record.lowLimitPrice) ??
+      toPositiveNumber(record.minPrice)
     );
   }
 

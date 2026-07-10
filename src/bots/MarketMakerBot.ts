@@ -1,4 +1,5 @@
 import { BotKind, OrderSide, type OrderSide as OrderSideValue } from "../constants.js";
+import { hasPriceLimits, priceLimitSideBlockReason, priceLimitViolation } from "../domain/priceLimits.js";
 import { pricesAroundCurrentPrice } from "../domain/tickSize.js";
 import type { MarketSnapshot, OrderDraft, Rng, RuntimeConfig } from "../types.js";
 import type { OrderRouter } from "../io/OrderRouter.js";
@@ -40,7 +41,7 @@ export class MarketMakerBot implements BotRunner {
   }
 
   createOrder(snapshot: MarketSnapshot, fairPrice: number): OrderDraft | null {
-    if (snapshot.lastPrice === null) {
+    if (snapshot.lastPrice === null || !hasPriceLimits(snapshot)) {
       return null;
     }
 
@@ -61,6 +62,7 @@ export class MarketMakerBot implements BotRunner {
         config: this.config,
         botKind: BotKind.MARKET_MAKER,
         side,
+        snapshot,
         price,
         reason: "empty_quote_level",
         rng: this.rng
@@ -121,8 +123,13 @@ export class MarketMakerBot implements BotRunner {
   }
 
   private firstEmptyPrice(snapshot: MarketSnapshot, side: OrderSideValue, currentPrice: number): number | null {
+    if (priceLimitSideBlockReason(side, snapshot) !== null) {
+      return null;
+    }
+
     const occupiedPrices = this.occupiedPriceSet(snapshot);
-    const candidates = pricesAroundCurrentPrice(currentPrice, side, 10);
+    const candidates = pricesAroundCurrentPrice(currentPrice, side, 10)
+      .filter((price) => priceLimitViolation(price, snapshot) === null);
     return candidates.find((price) => !occupiedPrices.has(price)) ?? null;
   }
 
