@@ -17,7 +17,7 @@ import {
   normalizeLimitPrice,
   pricesAroundCurrentPrice
 } from "../src/domain/tickSize.js";
-import { clampPriceToLimits } from "../src/domain/priceLimits.js";
+import { createSeededRng, deriveSeed } from "../src/domain/random.js";
 
 test("tick size follows Kronex market bands", () => {
   assert.equal(getTickSize(1_999), 1);
@@ -44,12 +44,20 @@ test("market maker quote ladders are built around the current price", () => {
   assert.deepEqual(asks, [10_010, 10_020, 10_030]);
 });
 
-test("fair price is clamped to known stock price limits", () => {
-  const bounds = { upperLimitPrice: 20_000, lowerLimitPrice: 10_000 };
+test("seeded rng is reproducible and derived seeds split streams", () => {
+  const left = createSeededRng("same-seed");
+  const right = createSeededRng("same-seed");
+  const stockOne = createSeededRng(deriveSeed("base-seed", "stock", 1, "fair"));
+  const stockTwo = createSeededRng(deriveSeed("base-seed", "stock", 2, "fair"));
 
-  assert.equal(clampPriceToLimits(25_000, bounds), 20_000);
-  assert.equal(clampPriceToLimits(15_000, bounds), 15_000);
-  assert.equal(clampPriceToLimits(5_000, bounds), 10_000);
+  assert.deepEqual(
+    Array.from({ length: 5 }, () => left()),
+    Array.from({ length: 5 }, () => right())
+  );
+  assert.notDeepEqual(
+    Array.from({ length: 5 }, () => stockOne()),
+    Array.from({ length: 5 }, () => stockTwo())
+  );
 });
 
 test("fair price moves every update and never falls below one won", () => {

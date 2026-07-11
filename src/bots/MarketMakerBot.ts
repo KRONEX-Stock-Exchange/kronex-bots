@@ -1,5 +1,5 @@
 import { BotKind, OrderSide, type OrderSide as OrderSideValue } from "../constants.js";
-import { hasPriceLimits, priceLimitSideBlockReason, priceLimitViolation } from "../domain/priceLimits.js";
+import { filterAllowedOrderSides, hasPriceLimits, priceLimitSideBlockReason, priceLimitViolation } from "../domain/priceLimits.js";
 import { pricesAroundCurrentPrice } from "../domain/tickSize.js";
 import type { MarketSnapshot, OrderDraft, Rng, RuntimeConfig } from "../types.js";
 import type { OrderRouter } from "../io/OrderRouter.js";
@@ -14,7 +14,7 @@ export class MarketMakerBot implements BotRunner {
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastOrderAt = 0;
   private busy = false;
-  private neutralFirstSide: OrderSideValue = OrderSide.BUY;
+  private neutralFirstSide: OrderSideValue;
   private readonly locallyReservedPrices = new Map<number, number>();
   private readonly rng: Rng;
 
@@ -25,6 +25,7 @@ export class MarketMakerBot implements BotRunner {
     rng: Rng = Math.random
   ) {
     this.rng = rng;
+    this.neutralFirstSide = this.rng() < 0.5 ? OrderSide.BUY : OrderSide.SELL;
   }
 
   start(): void {
@@ -46,7 +47,7 @@ export class MarketMakerBot implements BotRunner {
     }
 
     const currentPrice = snapshot.lastPrice;
-    const sidePreference = this.sidePreference(currentPrice, fairPrice);
+    const sidePreference = filterAllowedOrderSides(this.sidePreference(currentPrice, fairPrice), snapshot);
     const emptyPriceBySide = {
       [OrderSide.BUY]: this.firstEmptyPrice(snapshot, OrderSide.BUY, currentPrice),
       [OrderSide.SELL]: this.firstEmptyPrice(snapshot, OrderSide.SELL, currentPrice)

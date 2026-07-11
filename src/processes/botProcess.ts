@@ -9,6 +9,7 @@ import { MarketMakerBot } from "../bots/MarketMakerBot.js";
 import { NoiseTakerBot } from "../bots/NoiseTakerBot.js";
 import { MomentumBot } from "../bots/MomentumBot.js";
 import { MeanReversionBot } from "../bots/MeanReversionBot.js";
+import { createSeededRng, deriveSeed, seedFingerprint } from "../domain/random.js";
 
 const loadedConfig = loadConfig();
 const stockId = parseStockId(process.argv[3], loadedConfig.stockId);
@@ -17,6 +18,9 @@ const logger = new JsonlLogger(config.logFilePath);
 const apiClient = new KronexApiClient(config);
 const router = new OrderRouter(config, apiClient, logger);
 const botKind = parseBotKind(process.argv[2] ?? process.env.BOT_PROCESS_KIND);
+const processSeed = process.env.BOT_PROCESS_RANDOM_SEED
+  ?? deriveSeed(config.random.seed, "stock", config.stockId, "bot", botKind);
+const botRng = createSeededRng(processSeed);
 
 let latestSnapshot: MarketSnapshot | null = null;
 let latestFairPrice: number | null = null;
@@ -30,7 +34,7 @@ const bot = createBot(botKind);
 bot.start();
 
 // void logger.log("bot_process_started", { botKind });
-console.log(`[${botKind}] started stockId=${config.stockId} pid=${process.pid}`);
+console.log(`[${botKind}] started stockId=${config.stockId} pid=${process.pid} seed=${seedFingerprint(processSeed)}`);
 
 process.on("message", (message: unknown) => {
   const parsedMessage = parseMessage(message);
@@ -61,18 +65,18 @@ process.on("SIGINT", () => {
 
 function createBot(kind: BotKind): BotRunner {
   if (kind === BotKind.MARKET_MAKER) {
-    return new MarketMakerBot(config, router, getState);
+    return new MarketMakerBot(config, router, getState, botRng);
   }
 
   if (kind === BotKind.NOISE_TAKER) {
-    return new NoiseTakerBot(config, router, getState);
+    return new NoiseTakerBot(config, router, getState, botRng);
   }
 
   if (kind === BotKind.MOMENTUM) {
-    return new MomentumBot(config, router, getState);
+    return new MomentumBot(config, router, getState, botRng);
   }
 
-  return new MeanReversionBot(config, router, getState);
+  return new MeanReversionBot(config, router, getState, botRng);
 }
 
 function parseBotKind(value: string | undefined): BotKind {

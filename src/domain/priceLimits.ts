@@ -1,8 +1,6 @@
 import { OrderSide, type OrderSide as OrderSideValue } from "../constants.js";
 import type { MarketSnapshot } from "../types.js";
 
-type PriceLimitBounds = Pick<MarketSnapshot, "upperLimitPrice" | "lowerLimitPrice">;
-
 export type PriceLimitViolationReason =
   | "price_above_upper_limit"
   | "price_below_lower_limit";
@@ -10,6 +8,8 @@ export type PriceLimitViolationReason =
 export type PriceLimitSideBlockReason =
   | "upper_limit_buy_blocked"
   | "lower_limit_sell_blocked";
+
+export type PriceLimitState = "NORMAL" | "AT_UPPER" | "AT_LOWER" | "LOCKED";
 
 export function hasPriceLimits(snapshot: MarketSnapshot): boolean {
   return snapshot.upperLimitPrice !== null && snapshot.lowerLimitPrice !== null;
@@ -27,26 +27,46 @@ export function priceLimitViolation(price: number, snapshot: MarketSnapshot): Pr
   return null;
 }
 
-export function clampPriceToLimits(price: number, bounds: PriceLimitBounds): number {
-  let clampedPrice = Math.max(1, price);
+export function priceLimitState(snapshot: MarketSnapshot): PriceLimitState {
+  const atUpperLimit = isAtUpperLimit(snapshot);
+  const atLowerLimit = isAtLowerLimit(snapshot);
 
-  if (
-    bounds.upperLimitPrice !== null
-    && bounds.lowerLimitPrice !== null
-    && bounds.lowerLimitPrice > bounds.upperLimitPrice
-  ) {
-    return clampedPrice;
+  if (atUpperLimit && atLowerLimit) {
+    return "LOCKED";
   }
 
-  if (bounds.lowerLimitPrice !== null) {
-    clampedPrice = Math.max(bounds.lowerLimitPrice, clampedPrice);
+  if (atUpperLimit) {
+    return "AT_UPPER";
   }
 
-  if (bounds.upperLimitPrice !== null) {
-    clampedPrice = Math.min(bounds.upperLimitPrice, clampedPrice);
+  if (atLowerLimit) {
+    return "AT_LOWER";
   }
 
-  return clampedPrice;
+  return "NORMAL";
+}
+
+export function allowedOrderSides(snapshot: MarketSnapshot): OrderSideValue[] {
+  const state = priceLimitState(snapshot);
+
+  if (state === "AT_UPPER") {
+    return [OrderSide.SELL];
+  }
+
+  if (state === "AT_LOWER") {
+    return [OrderSide.BUY];
+  }
+
+  if (state === "LOCKED") {
+    return [];
+  }
+
+  return [OrderSide.BUY, OrderSide.SELL];
+}
+
+export function filterAllowedOrderSides(sides: OrderSideValue[], snapshot: MarketSnapshot): OrderSideValue[] {
+  const allowedSides = new Set(allowedOrderSides(snapshot));
+  return sides.filter((side) => allowedSides.has(side));
 }
 
 export function isAtUpperLimit(snapshot: MarketSnapshot): boolean {

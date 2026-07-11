@@ -1,5 +1,6 @@
 import { BotKind, OrderSide } from "../constants.js";
 import { clamp, randomInt } from "../domain/math.js";
+import { allowedOrderSides, filterAllowedOrderSides } from "../domain/priceLimits.js";
 import type { MarketSnapshot, OrderDraft, Rng, RuntimeConfig } from "../types.js";
 import type { OrderRouter } from "../io/OrderRouter.js";
 import {
@@ -42,17 +43,24 @@ export class NoiseTakerBot implements BotRunner {
       return null;
     }
 
-    const side = this.chooseSide(snapshot.lastPrice, fairPrice);
-    return createMarketOrder({
-      config: this.config,
-      botKind: BotKind.NOISE_TAKER,
-      side,
-      snapshot,
-      minNotional: this.config.bots.noiseTaker.minNotional,
-      maxNotional: this.config.bots.noiseTaker.maxNotional,
-      reason: "probabilistic_noise_order",
-      rng: this.rng
-    });
+    for (const side of this.sideCandidates(snapshot, fairPrice)) {
+      const order = createMarketOrder({
+        config: this.config,
+        botKind: BotKind.NOISE_TAKER,
+        side,
+        snapshot,
+        minNotional: this.config.bots.noiseTaker.minNotional,
+        maxNotional: this.config.bots.noiseTaker.maxNotional,
+        reason: "probabilistic_noise_order",
+        rng: this.rng
+      });
+
+      if (order !== null) {
+        return order;
+      }
+    }
+
+    return null;
   }
 
   buyProbabilityPct(currentPrice: number, fairPrice: number): number {
@@ -109,5 +117,36 @@ export class NoiseTakerBot implements BotRunner {
   private chooseSide(currentPrice: number, fairPrice: number): typeof OrderSide.BUY | typeof OrderSide.SELL {
     const buyProbability = this.buyProbabilityPct(currentPrice, fairPrice) / 100;
     return this.rng() < buyProbability ? OrderSide.BUY : OrderSide.SELL;
+  }
+
+  private sideCandidates(snapshot: MarketSnapshot, fairPrice: number): Array<typeof OrderSide.BUY | typeof OrderSide.SELL> {
+    if (snapshot.lastPrice === null) {
+      return [];
+    }
+
+    const preferredSide = this.chooseSide(snapshot.lastPrice, fairPrice);
+    const fallbackSide = this.fairPriceDirectionalSide(snapshot.lastPrice, fairPrice);
+    const candidates = fallbackSide === null || fallbackSide === preferredSide
+      ? [preferredSide]
+      : [preferredSide, fallbackSide];
+    const allowedFallbackSides = allowedOrderSides(snapshot) as Array<typeof OrderSide.BUY | typeof OrderSide.SELL>;
+    const allowedCandidates = filterAllowedOrderSides(candidates, snapshot);
+
+    return allowedCandidates.length > 0 ? allowedCandidates : allowedFallbackSides;
+  }
+
+  private fairPriceDirectionalSide(
+    currentPrice: number,
+    fairPrice: number
+  ): typeof OrderSide.BUY | typeof OrderSide.SELL | null {
+    if (fairPrice >= currentPrice * 1.005) {
+      return OrderSide.BUY;
+    }
+
+    if (fairPrice <= currentPrice * 0.995) {
+      return OrderSide.SELL;
+    }
+
+    return null;
   }
 }

@@ -20,6 +20,11 @@ function config(overrides: Partial<RuntimeConfig> = {}): RuntimeConfig {
     wsUrl: "ws://localhost:3001/stock",
     accessToken: "token",
     logFilePath: "/tmp/kronex-bots-test.jsonl",
+    random: {
+      seed: "test-seed",
+      fairStartJitterMs: 500,
+      fairEventStartJitterMs: 3_000
+    },
     orderSizing: {
       referencePrice: 7_500,
       decayExponent: 0.3,
@@ -191,20 +196,40 @@ test("noise taker computes documented buy probability clamps", () => {
   assert.equal(taker.createOrder(snapshot(), 11_000)?.side, OrderSide.BUY);
 });
 
-test("market order bots skip sides blocked by price limits", () => {
+test("market order bots use the allowed side at price limits", () => {
   const upperBuyTaker = new NoiseTakerBot(config(), fakeRouter, () => ({ snapshot: null, fairPrice: null }), () => 0);
   assert.equal(upperBuyTaker.createOrder(snapshot({
     lastPrice: 20_000,
     upperLimitPrice: 20_000,
     lowerLimitPrice: 10_000
-  }), 30_000), null);
+  }), 30_000)?.side, OrderSide.SELL);
 
   const lowerSellTaker = new NoiseTakerBot(config(), fakeRouter, () => ({ snapshot: null, fairPrice: null }), () => 0.999);
   assert.equal(lowerSellTaker.createOrder(snapshot({
     lastPrice: 5_000,
     upperLimitPrice: 10_000,
     lowerLimitPrice: 5_000
-  }), 4_000), null);
+  }), 4_000)?.side, OrderSide.BUY);
+});
+
+test("noise taker resumes through the allowed side at price limits when fair price reverses", () => {
+  const upperLimitTaker = new NoiseTakerBot(config(), fakeRouter, () => ({ snapshot: null, fairPrice: null }), () => 0);
+  const upperOrder = upperLimitTaker.createOrder(snapshot({
+    lastPrice: 20_000,
+    upperLimitPrice: 20_000,
+    lowerLimitPrice: 10_000
+  }), 18_000);
+
+  assert.equal(upperOrder?.side, OrderSide.SELL);
+
+  const lowerLimitTaker = new NoiseTakerBot(config(), fakeRouter, () => ({ snapshot: null, fairPrice: null }), () => 0.999);
+  const lowerOrder = lowerLimitTaker.createOrder(snapshot({
+    lastPrice: 5_000,
+    upperLimitPrice: 10_000,
+    lowerLimitPrice: 5_000
+  }), 6_000);
+
+  assert.equal(lowerOrder?.side, OrderSide.BUY);
 });
 
 test("noise taker side probability follows configured min max and full bias divergence", () => {

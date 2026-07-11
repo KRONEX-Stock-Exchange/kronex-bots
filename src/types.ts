@@ -42,6 +42,12 @@ export interface FairPriceEventConfig {
   maxRatePct: number;
 }
 
+export interface RandomConfig {
+  seed: string;
+  fairStartJitterMs: number;
+  fairEventStartJitterMs: number;
+}
+
 export interface RuntimeConfig {
   stockId: number;
   stockIds: number[];
@@ -49,6 +55,7 @@ export interface RuntimeConfig {
   wsUrl: string;
   accessToken: string;
   logFilePath: string;
+  random: RandomConfig;
   orderSizing: OrderSizingConfig;
   fairPrice: FairPriceConfig;
   fairPriceEvent: FairPriceEventConfig;

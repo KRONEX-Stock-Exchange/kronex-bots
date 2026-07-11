@@ -13,7 +13,11 @@ FairPrice 이벤트 워커는 일반 FairPrice 워커와 별개로 작동하며,
 
 FairPrice는 **최소 1원 미만으로 내려가지 않는다.**
 
-상한가/하한가를 알고 있는 경우 FairPrice는 해당 범위를 넘어가지 못한다.
+FairPrice는 상한가/하한가 밖으로 움직일 수 있다.
+
+종목별 FairPrice 워커와 FairPrice 이벤트 워커는 서로 독립된 랜덤 시드를 사용한다. `BOT_RANDOM_SEED`가 비어 있으면 실행할 때마다 새 시드를 만들고, 값이 있으면 같은 랜덤 흐름을 재현한다.
+
+여러 종목이 같은 순간에 FairPrice를 바꾸지 않도록 첫 시작 시점에 `BOT_FAIR_START_JITTER_MS`, `BOT_FAIR_EVENT_START_JITTER_MS` 범위 안에서 종목별 지연을 적용한다.
 
 아래 봇들은 이 값을 참고하여 주문을 낸다.
 
@@ -156,11 +160,13 @@ FairPrice는 **최소 1원 미만으로 내려가지 않는다.**
 - 주문가격이 상한가보다 높거나 하한가보다 낮으면 주문을 생성하지 않는다.
 - 현재가가 상한가에 도달하면 매수 주문을 생성하지 않는다.
 - 현재가가 하한가에 도달하면 매도 주문을 생성하지 않는다.
+- 상한가/하한가에서 한쪽 주문이 막힌 상태라도 허용 가능한 반대 주문은 생성할 수 있다.
 
 ### 환경변수 튜닝
 
 - 봇별 주문 주기와 최소/최대 기준 주문금액은 `.env`에서 조정한다.
 - 병렬 실행 종목: `BOT_STOCK_IDS`
+- 랜덤 시드와 FairPrice 시작 지연: `BOT_RANDOM_SEED`, `BOT_FAIR_START_JITTER_MS`, `BOT_FAIR_EVENT_START_JITTER_MS`
 - 공통 주문금액 스케일: `BOT_ORDER_REFERENCE_PRICE`, `BOT_ORDER_PRICE_DECAY_EXPONENT`, `BOT_MAX_ORDER_NOTIONAL`
 - MarketMaker: `BOT_MM_CHECK_INTERVAL_MS`, `BOT_MM_ORDER_INTERVAL_MS`, `BOT_MM_MIN_ORDER_NOTIONAL`, `BOT_MM_MAX_ORDER_NOTIONAL`
 - NoiseTaker: `BOT_NOISE_MIN_INTERVAL_MS`, `BOT_NOISE_MAX_INTERVAL_MS`, `BOT_NOISE_MIN_ORDER_NOTIONAL`, `BOT_NOISE_MAX_ORDER_NOTIONAL`, `BOT_NOISE_MIN_SIDE_PROBABILITY_PCT`, `BOT_NOISE_MAX_SIDE_PROBABILITY_PCT`, `BOT_NOISE_FULL_BIAS_DIVERGENCE_PCT`

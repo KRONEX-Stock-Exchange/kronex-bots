@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { STRATEGY_LIMITS } from "./constants.js";
 import { hardMaxNotionalFromEnv, normalizeDecayExponent } from "./domain/orderSizing.js";
+import { createRunSeed } from "./domain/random.js";
 import type { RuntimeConfig } from "./types.js";
 
 const ENV_FILE_PATH = ".env";
@@ -50,9 +51,19 @@ function positiveNumberEnv(name: string, fallback: number): number {
   return value > 0 ? value : fallback;
 }
 
+function nonNegativeNumberEnv(name: string, fallback: number): number {
+  const value = numberEnv(name, fallback);
+  return value >= 0 ? value : fallback;
+}
+
 function stringEnv(name: string, fallback: string): string {
   const value = process.env[name]?.trim();
   return value ? value : fallback;
+}
+
+function randomSeedEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  return value ? value : createRunSeed();
 }
 
 function positiveNumberListEnv(name: string, fallback: number): number[] {
@@ -151,6 +162,11 @@ export function loadConfig(): RuntimeConfig {
     wsUrl: stringEnv("KRONEX_WS_URL", "ws://localhost:3001/stock"),
     accessToken: stringEnv("BOT_ACCESS_TOKEN", ""),
     logFilePath: stringEnv("BOT_LOG_FILE", "logs/bot-events.jsonl"),
+    random: {
+      seed: randomSeedEnv("BOT_RANDOM_SEED"),
+      fairStartJitterMs: nonNegativeNumberEnv("BOT_FAIR_START_JITTER_MS", 500),
+      fairEventStartJitterMs: nonNegativeNumberEnv("BOT_FAIR_EVENT_START_JITTER_MS", 3_000)
+    },
     orderSizing: {
       referencePrice: positiveNumberEnv("BOT_ORDER_REFERENCE_PRICE", STRATEGY_LIMITS.referencePrice),
       decayExponent: normalizeDecayExponent(numberEnv("BOT_ORDER_PRICE_DECAY_EXPONENT", STRATEGY_LIMITS.decayExponent)),

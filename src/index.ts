@@ -5,12 +5,12 @@ import { loadConfig } from "./config.js";
 import { FairPriceEventWorker } from "./domain/fairPriceEvent.js";
 import { FairPriceWorker } from "./domain/fairPrice.js";
 import { toPositiveNumber } from "./domain/math.js";
-import { clampPriceToLimits } from "./domain/priceLimits.js";
+import { createSeededRng, deriveSeed, randomDelayMs, seedFingerprint } from "./domain/random.js";
 import { KronexApiClient } from "./io/KronexApiClient.js";
 import { JsonlLogger } from "./io/JsonlLogger.js";
 import { KronexSocketClient } from "./io/KronexSocketClient.js";
 import { MarketState } from "./market/MarketState.js";
-import type { KronexStock, MarketSnapshot, RootStateMessage, RuntimeConfig } from "./types.js";
+import type { KronexStock, RootStateMessage, RuntimeConfig } from "./types.js";
 
 type FairPriceMovement = {
   previousFairPrice: number;
@@ -31,12 +31,29 @@ class StockRuntime {
   private fairPriceTimer: ReturnType<typeof setInterval> | null = null;
   private fairPriceEventTimer: ReturnType<typeof setInterval> | null = null;
   private broadcastTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly fairPriceSeed: string;
+  private readonly fairPriceEventSeed: string;
+  private readonly fairPriceStartJitterMs: number;
+  private readonly fairPriceEventStartJitterMs: number;
 
   constructor(private readonly config: RuntimeConfig, logger: JsonlLogger) {
     this.logger = logger;
     this.marketState = new MarketState(config.stockId);
-    this.fairPriceWorker = new FairPriceWorker(config.fairPrice);
-    this.fairPriceEventWorker = new FairPriceEventWorker(config.fairPriceEvent);
+    this.fairPriceSeed = deriveSeed(config.random.seed, "stock", config.stockId, "fair-price");
+    this.fairPriceEventSeed = deriveSeed(config.random.seed, "stock", config.stockId, "fair-price-event");
+    this.fairPriceWorker = new FairPriceWorker(config.fairPrice, createSeededRng(this.fairPriceSeed));
+    this.fairPriceEventWorker = new FairPriceEventWorker(
+      config.fairPriceEvent,
+      createSeededRng(this.fairPriceEventSeed)
+    );
+    this.fairPriceStartJitterMs = randomDelayMs(
+      config.random.fairStartJitterMs,
+      createSeededRng(deriveSeed(config.random.seed, "stock", config.stockId, "fair-price-start-jitter"))
+    );
+    this.fairPriceEventStartJitterMs = randomDelayMs(
+      config.random.fairEventStartJitterMs,
+      createSeededRng(deriveSeed(config.random.seed, "stock", config.stockId, "fair-price-event-start-jitter"))
+    );
     this.socketClient = new KronexSocketClient(config, this.marketState, this.logger);
   }
 
@@ -48,7 +65,7 @@ class StockRuntime {
       throw new Error(`stockId=${this.config.stockId} has no initial price`);
     }
 
-    this.fairPriceWorker.initialize(clampPriceToLimits(initialPrice, this.marketState.getSnapshot()));
+    this.fairPriceWorker.initialize(initialPrice);
     this.spawnBots();
     this.socketClient.connect();
     this.startTimers();
@@ -63,7 +80,9 @@ class StockRuntime {
     //   fairPriceEventMaxRatePct: this.config.fairPriceEvent.maxRatePct,
     //   botCount: this.children.size
     // });
-    console.log(`[StockRuntime] running stockId=${this.config.stockId} bots=${this.children.size}`);
+    console.log(
+      `[StockRuntime] running stockId=${this.config.stockId} bots=${this.children.size} seed=${seedFingerprint(this.fairPriceSeed)} fairJitter=${this.fairPriceStartJitterMs}ms eventJitter=${this.fairPriceEventStartJitterMs}ms`
+    );
   }
 
   async stop(reason: string): Promise<void> {
@@ -91,9 +110,13 @@ class StockRuntime {
     const childPath = fileURLToPath(new URL("./processes/botProcess.js", import.meta.url));
 
     for (const kind of BOT_KINDS) {
+      const processSeed = deriveSeed(this.config.random.seed, "stock", this.config.stockId, "bot", kind);
       const child = fork(childPath, [kind, String(this.config.stockId)], {
         stdio: ["inherit", "inherit", "inherit", "ipc"],
-        env: { ...process.env }
+        env: {
+          ...process.env,
+          BOT_PROCESS_RANDOM_SEED: processSeed
+        }
       });
 
       this.children.set(kind, child);
@@ -104,35 +127,43 @@ class StockRuntime {
   }
 
   private startTimers(): void {
-    this.fairPriceTimer = setInterval(() => {
-      const snapshot = this.marketState.getSnapshot();
-      const currentPrice = snapshot.lastPrice;
-      if (currentPrice === null) {
-        return;
-      }
+    this.fairPriceTimer = setTimeout(() => {
+      this.fairPriceTimer = setInterval(() => {
+        this.updateFairPrice();
+      }, this.config.fairPrice.intervalMs);
+    }, this.fairPriceStartJitterMs);
 
-      const update = this.applyFairPriceLimits(this.fairPriceWorker.update(currentPrice), snapshot);
-      this.fairPriceWorker.replaceValue(update.fairPrice);
-      // void this.logger.log("fair_price_updated", { ...update });
-      this.logFairPriceMovement("FairPriceWorker", currentPrice, update);
-      this.broadcastState();
-    }, this.config.fairPrice.intervalMs);
-
-    this.fairPriceEventTimer = setInterval(() => {
-      const snapshot = this.marketState.getSnapshot();
-      const update = this.applyFairPriceLimits(
-        this.fairPriceEventWorker.update(this.fairPriceWorker.value),
-        snapshot
-      );
-      this.fairPriceWorker.replaceValue(update.fairPrice);
-      // void this.logger.log("fair_price_event_updated", { ...update });
-      this.logFairPriceMovement("FairPriceEventWorker", snapshot.lastPrice, update);
-      this.broadcastState();
-    }, this.config.fairPriceEvent.intervalMs);
+    this.fairPriceEventTimer = setTimeout(() => {
+      this.fairPriceEventTimer = setInterval(() => {
+        this.updateFairPriceEvent();
+      }, this.config.fairPriceEvent.intervalMs);
+    }, this.fairPriceEventStartJitterMs);
 
     this.broadcastTimer = setInterval(() => {
       this.broadcastState();
     }, 100);
+  }
+
+  private updateFairPrice(): void {
+    const snapshot = this.marketState.getSnapshot();
+    const currentPrice = snapshot.lastPrice;
+    if (currentPrice === null) {
+      return;
+    }
+
+    const update = this.fairPriceWorker.update(currentPrice);
+    // void this.logger.log("fair_price_updated", { ...update });
+    this.logFairPriceMovement("FairPriceWorker", currentPrice, update);
+    this.broadcastState();
+  }
+
+  private updateFairPriceEvent(): void {
+    const snapshot = this.marketState.getSnapshot();
+    const update = this.fairPriceEventWorker.update(this.fairPriceWorker.value);
+    this.fairPriceWorker.replaceValue(update.fairPrice);
+    // void this.logger.log("fair_price_event_updated", { ...update });
+    this.logFairPriceMovement("FairPriceEventWorker", snapshot.lastPrice, update);
+    this.broadcastState();
   }
 
   private clearTimers(): void {
@@ -154,11 +185,10 @@ class StockRuntime {
 
   private broadcastState(): void {
     const snapshot = this.marketState.getSnapshot();
-    const fairPrice = this.enforceFairPriceLimits(snapshot);
     const message: RootStateMessage = {
       type: "state",
       snapshot,
-      fairPrice
+      fairPrice: this.fairPriceWorker.value
     };
 
     for (const child of this.children.values()) {
@@ -166,40 +196,6 @@ class StockRuntime {
         child.send(message);
       }
     }
-  }
-
-  private enforceFairPriceLimits(snapshot: MarketSnapshot): number {
-    const fairPrice = clampPriceToLimits(this.fairPriceWorker.value, snapshot);
-    if (fairPrice !== this.fairPriceWorker.value) {
-      this.fairPriceWorker.replaceValue(fairPrice);
-    }
-
-    return fairPrice;
-  }
-
-  private applyFairPriceLimits<T extends FairPriceMovement>(update: T, snapshot: MarketSnapshot): T {
-    const fairPrice = clampPriceToLimits(update.fairPrice, snapshot);
-    if (fairPrice === update.fairPrice) {
-      return update;
-    }
-
-    const fairPriceChange = fairPrice - update.previousFairPrice;
-    const adjusted = {
-      ...update,
-      fairPrice,
-      fairPriceChange,
-      fairPriceChangePct: update.previousFairPrice > 0
-        ? (fairPriceChange / update.previousFairPrice) * 100
-        : 0
-    };
-
-    if (adjusted.currentPrice !== undefined) {
-      adjusted.divergencePct = Number.isFinite(adjusted.currentPrice) && adjusted.currentPrice > 0
-        ? ((fairPrice - adjusted.currentPrice) / adjusted.currentPrice) * 100
-        : 0;
-    }
-
-    return adjusted;
   }
 
   private formatSigned(value: number, fractionDigits: number): string {
