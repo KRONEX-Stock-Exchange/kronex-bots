@@ -55,6 +55,20 @@ function stringEnv(name: string, fallback: string): string {
   return value ? value : fallback;
 }
 
+function positiveNumberListEnv(name: string, fallback: number): number[] {
+  const rawValue = process.env[name]?.trim();
+  if (!rawValue) {
+    return [fallback];
+  }
+
+  const values = rawValue
+    .split(",")
+    .map((value) => Number(value.trim()))
+    .filter((value) => Number.isInteger(value) && value > 0);
+  const uniqueValues = Array.from(new Set(values));
+  return uniqueValues.length > 0 ? uniqueValues : [fallback];
+}
+
 function notionalRange(minValue: number, maxValue: number, hardMaxNotional: number): { minNotional: number; maxNotional: number } {
   const maxNotional = Math.min(Math.max(1, maxValue), hardMaxNotional);
   const minNotional = Math.min(Math.max(1, minValue), maxNotional);
@@ -92,6 +106,7 @@ function sideProbabilityConfig(
 loadEnvFile();
 
 export function loadConfig(): RuntimeConfig {
+  const stockIds = positiveNumberListEnv("BOT_STOCK_IDS", 1);
   const hardMaxOrderNotional = hardMaxNotionalFromEnv(
     numberEnv("BOT_MAX_ORDER_NOTIONAL", STRATEGY_LIMITS.hardMaxNotional)
   );
@@ -130,7 +145,8 @@ export function loadConfig(): RuntimeConfig {
   );
 
   return {
-    stockId: numberEnv("BOT_STOCK_ID", 1),
+    stockId: stockIds[0],
+    stockIds,
     apiBaseUrl: stringEnv("KRONEX_API_BASE_URL", "http://localhost:3000/api"),
     wsUrl: stringEnv("KRONEX_WS_URL", "ws://localhost:3001/stock"),
     accessToken: stringEnv("BOT_ACCESS_TOKEN", ""),

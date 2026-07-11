@@ -10,7 +10,9 @@ import { NoiseTakerBot } from "../bots/NoiseTakerBot.js";
 import { MomentumBot } from "../bots/MomentumBot.js";
 import { MeanReversionBot } from "../bots/MeanReversionBot.js";
 
-const config = loadConfig();
+const loadedConfig = loadConfig();
+const stockId = parseStockId(process.argv[3], loadedConfig.stockId);
+const config = { ...loadedConfig, stockId, stockIds: [stockId] };
 const logger = new JsonlLogger(config.logFilePath);
 const apiClient = new KronexApiClient(config);
 const router = new OrderRouter(config, apiClient, logger);
@@ -28,7 +30,7 @@ const bot = createBot(botKind);
 bot.start();
 
 // void logger.log("bot_process_started", { botKind });
-console.log(`[${botKind}] started pid=${process.pid}`);
+console.log(`[${botKind}] started stockId=${config.stockId} pid=${process.pid}`);
 
 process.on("message", (message: unknown) => {
   const parsedMessage = parseMessage(message);
@@ -79,6 +81,11 @@ function parseBotKind(value: string | undefined): BotKind {
   }
 
   throw new Error(`invalid bot kind: ${value ?? "missing"}`);
+}
+
+function parseStockId(value: string | undefined, fallback: number): number {
+  const stockId = Number(value);
+  return Number.isInteger(stockId) && stockId > 0 ? stockId : fallback;
 }
 
 function parseMessage(message: unknown): BotProcessMessage | null {

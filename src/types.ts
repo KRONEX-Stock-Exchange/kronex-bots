@@ -44,6 +44,7 @@ export interface FairPriceEventConfig {
 
 export interface RuntimeConfig {
   stockId: number;
+  stockIds: number[];
   apiBaseUrl: string;
   wsUrl: string;
   accessToken: string;

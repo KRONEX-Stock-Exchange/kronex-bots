@@ -15,6 +15,7 @@ import type { JsonlLogger } from "../src/io/JsonlLogger.js";
 function config(overrides: Partial<RuntimeConfig> = {}): RuntimeConfig {
   return {
     stockId: 1,
+    stockIds: [1],
     apiBaseUrl: "http://localhost:3000/api",
     wsUrl: "ws://localhost:3001/stock",
     accessToken: "token",

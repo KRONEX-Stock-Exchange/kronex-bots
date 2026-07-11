@@ -1,6 +1,8 @@
 import { OrderSide, type OrderSide as OrderSideValue } from "../constants.js";
 import type { MarketSnapshot } from "../types.js";
 
+type PriceLimitBounds = Pick<MarketSnapshot, "upperLimitPrice" | "lowerLimitPrice">;
+
 export type PriceLimitViolationReason =
   | "price_above_upper_limit"
   | "price_below_lower_limit";
@@ -23,6 +25,28 @@ export function priceLimitViolation(price: number, snapshot: MarketSnapshot): Pr
   }
 
   return null;
+}
+
+export function clampPriceToLimits(price: number, bounds: PriceLimitBounds): number {
+  let clampedPrice = Math.max(1, price);
+
+  if (
+    bounds.upperLimitPrice !== null
+    && bounds.lowerLimitPrice !== null
+    && bounds.lowerLimitPrice > bounds.upperLimitPrice
+  ) {
+    return clampedPrice;
+  }
+
+  if (bounds.lowerLimitPrice !== null) {
+    clampedPrice = Math.max(bounds.lowerLimitPrice, clampedPrice);
+  }
+
+  if (bounds.upperLimitPrice !== null) {
+    clampedPrice = Math.min(bounds.upperLimitPrice, clampedPrice);
+  }
+
+  return clampedPrice;
 }
 
 export function isAtUpperLimit(snapshot: MarketSnapshot): boolean {

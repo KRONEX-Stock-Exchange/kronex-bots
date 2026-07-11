@@ -13,11 +13,15 @@ FairPrice 이벤트 워커는 일반 FairPrice 워커와 별개로 작동하며,
 
 FairPrice는 **최소 1원 미만으로 내려가지 않는다.**
 
+상한가/하한가를 알고 있는 경우 FairPrice는 해당 범위를 넘어가지 못한다.
+
 아래 봇들은 이 값을 참고하여 주문을 낸다.
 
 봇은 총 4가지의 종류로 구성되어 있고 각자 별도의 프로세스에서 작동된다. (실행 시 Root 프로세스를 실행하면 모든 봇이 함께 실행되어야 한다.)
 
-각 봇 타입들은 각각 한개의 프로세스만 실행한다.
+각 봇 타입들은 종목별로 각각 한개의 프로세스를 실행한다.
+
+여러 종목을 병렬로 실행할 경우 `.env`의 `BOT_STOCK_IDS`에 쉼표로 구분해 지정한다.
 
 봇시작시 FairPrice는 현재가를 기준으로 초기화한다.
 
@@ -156,6 +160,7 @@ FairPrice는 **최소 1원 미만으로 내려가지 않는다.**
 ### 환경변수 튜닝
 
 - 봇별 주문 주기와 최소/최대 기준 주문금액은 `.env`에서 조정한다.
+- 병렬 실행 종목: `BOT_STOCK_IDS`
 - 공통 주문금액 스케일: `BOT_ORDER_REFERENCE_PRICE`, `BOT_ORDER_PRICE_DECAY_EXPONENT`, `BOT_MAX_ORDER_NOTIONAL`
 - MarketMaker: `BOT_MM_CHECK_INTERVAL_MS`, `BOT_MM_ORDER_INTERVAL_MS`, `BOT_MM_MIN_ORDER_NOTIONAL`, `BOT_MM_MAX_ORDER_NOTIONAL`
 - NoiseTaker: `BOT_NOISE_MIN_INTERVAL_MS`, `BOT_NOISE_MAX_INTERVAL_MS`, `BOT_NOISE_MIN_ORDER_NOTIONAL`, `BOT_NOISE_MAX_ORDER_NOTIONAL`, `BOT_NOISE_MIN_SIDE_PROBABILITY_PCT`, `BOT_NOISE_MAX_SIDE_PROBABILITY_PCT`, `BOT_NOISE_FULL_BIAS_DIVERGENCE_PCT`
