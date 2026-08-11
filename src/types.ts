@@ -66,12 +66,11 @@ export interface RuntimeConfig {
   bots: {
     marketMaker: NotionalRangeConfig & {
       checkIntervalMs: number;
-      orderIntervalMs: number;
+      minOrderIntervalMs: number;
+      maxOrderIntervalMs: number;
     };
     noiseTaker: NotionalRangeConfig & IntervalRangeConfig & SideProbabilityConfig;
-    momentum: NotionalRangeConfig & {
-      intervalMs: number;
-    };
+    momentum: NotionalRangeConfig & IntervalRangeConfig;
     meanReversion: NotionalRangeConfig & IntervalRangeConfig;
   };
 }

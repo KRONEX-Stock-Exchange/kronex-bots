@@ -1,4 +1,5 @@
 import { BotKind, OrderSide, type OrderSide as OrderSideValue } from "../constants.js";
+import { randomInt } from "../domain/math.js";
 import { filterAllowedOrderSides, hasPriceLimits, priceLimitSideBlockReason, priceLimitViolation } from "../domain/priceLimits.js";
 import { pricesAroundCurrentPrice } from "../domain/tickSize.js";
 import type { MarketSnapshot, OrderDraft, Rng, RuntimeConfig } from "../types.js";
@@ -13,9 +14,13 @@ import {
 export class MarketMakerBot implements BotRunner {
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastOrderAt = 0;
+  private nextOrderIntervalMs: number;
   private busy = false;
   private neutralFirstSide: OrderSideValue;
-  private readonly locallyReservedPrices = new Map<number, number>();
+  private readonly locallyReservedPrices: Record<OrderSideValue, Map<number, number>> = {
+    [OrderSide.BUY]: new Map<number, number>(),
+    [OrderSide.SELL]: new Map<number, number>()
+  };
   private readonly rng: Rng;
 
   constructor(
@@ -26,6 +31,7 @@ export class MarketMakerBot implements BotRunner {
   ) {
     this.rng = rng;
     this.neutralFirstSide = this.rng() < 0.5 ? OrderSide.BUY : OrderSide.SELL;
+    this.nextOrderIntervalMs = this.randomOrderIntervalMs();
   }
 
   start(): void {
@@ -70,7 +76,7 @@ export class MarketMakerBot implements BotRunner {
       });
 
       if (order !== null) {
-        this.locallyReservedPrices.set(price, Date.now());
+        this.locallyReservedPrices[side].set(price, Date.now());
       }
 
       return order;
@@ -86,7 +92,7 @@ export class MarketMakerBot implements BotRunner {
     }
 
     const now = Date.now();
-    if (now - this.lastOrderAt < this.config.bots.marketMaker.orderIntervalMs) {
+    if (now - this.lastOrderAt < this.nextOrderIntervalMs) {
       return;
     }
 
@@ -96,15 +102,24 @@ export class MarketMakerBot implements BotRunner {
     }
 
     this.lastOrderAt = now;
+    this.nextOrderIntervalMs = this.randomOrderIntervalMs();
     this.busy = true;
     try {
       const response = await this.router.route(order, readyState.snapshot, readyState.fairPrice);
       if (response === null || !response.ok) {
-        this.locallyReservedPrices.delete(order.price);
+        this.locallyReservedPrices[order.side].delete(order.price);
       }
     } finally {
       this.busy = false;
     }
+  }
+
+  private randomOrderIntervalMs(): number {
+    return randomInt(
+      this.config.bots.marketMaker.minOrderIntervalMs,
+      this.config.bots.marketMaker.maxOrderIntervalMs,
+      this.rng
+    );
   }
 
   private sidePreference(currentPrice: number, fairPrice: number): OrderSideValue[] {
@@ -128,25 +143,27 @@ export class MarketMakerBot implements BotRunner {
       return null;
     }
 
-    const occupiedPrices = this.occupiedPriceSet(snapshot);
+    const occupiedPrices = this.occupiedPriceSet(snapshot, side);
     const candidates = pricesAroundCurrentPrice(currentPrice, side, 10)
       .filter((price) => priceLimitViolation(price, snapshot) === null);
     return candidates.find((price) => !occupiedPrices.has(price)) ?? null;
   }
 
-  private occupiedPriceSet(snapshot: MarketSnapshot): Set<number> {
-    const visiblePrices = [...snapshot.bids, ...snapshot.asks]
-        .filter((level) => level.quantity > 0)
-        .map((level) => level.price);
+  private occupiedPriceSet(snapshot: MarketSnapshot, side: OrderSideValue): Set<number> {
+    const visibleLevels = side === OrderSide.BUY ? snapshot.bids : snapshot.asks;
+    const visiblePrices = visibleLevels
+      .filter((level) => level.quantity > 0)
+      .map((level) => level.price);
     const visiblePriceSet = new Set(visiblePrices);
+    const reservedPrices = this.locallyReservedPrices[side];
     const now = Date.now();
 
-    for (const [price, reservedAt] of this.locallyReservedPrices) {
+    for (const [price, reservedAt] of reservedPrices) {
       if (visiblePriceSet.has(price) || now - reservedAt > 10_000) {
-        this.locallyReservedPrices.delete(price);
+        reservedPrices.delete(price);
       }
     }
 
-    return new Set([...visiblePrices, ...this.locallyReservedPrices.keys()]);
+    return new Set([...visiblePrices, ...reservedPrices.keys()]);
   }
 }

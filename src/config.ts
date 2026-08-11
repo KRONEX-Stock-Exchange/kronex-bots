@@ -126,6 +126,10 @@ export function loadConfig(): RuntimeConfig {
     positiveNumberEnv("BOT_MM_MAX_ORDER_NOTIONAL", STRATEGY_LIMITS.marketMaker.maxNotional),
     hardMaxOrderNotional
   );
+  const marketMakerOrderInterval = intervalRange(
+    positiveNumberEnv("BOT_MM_MIN_ORDER_INTERVAL_MS", 30),
+    positiveNumberEnv("BOT_MM_MAX_ORDER_INTERVAL_MS", 90)
+  );
   const noiseTakerNotional = notionalRange(
     positiveNumberEnv("BOT_NOISE_MIN_ORDER_NOTIONAL", STRATEGY_LIMITS.noiseTaker.minNotional),
     positiveNumberEnv("BOT_NOISE_MAX_ORDER_NOTIONAL", STRATEGY_LIMITS.noiseTaker.maxNotional),
@@ -195,7 +199,8 @@ export function loadConfig(): RuntimeConfig {
     bots: {
       marketMaker: {
         checkIntervalMs: positiveNumberEnv("BOT_MM_CHECK_INTERVAL_MS", 100),
-        orderIntervalMs: positiveNumberEnv("BOT_MM_ORDER_INTERVAL_MS", 150),
+        minOrderIntervalMs: marketMakerOrderInterval.minIntervalMs,
+        maxOrderIntervalMs: marketMakerOrderInterval.maxIntervalMs,
         ...marketMakerNotional
       },
       noiseTaker: {
@@ -207,7 +212,10 @@ export function loadConfig(): RuntimeConfig {
         ...noiseTakerSideProbability
       },
       momentum: {
-        intervalMs: positiveNumberEnv("BOT_MOMENTUM_INTERVAL_MS", 450),
+        ...intervalRange(
+          positiveNumberEnv("BOT_MOMENTUM_MIN_INTERVAL_MS", 300),
+          positiveNumberEnv("BOT_MOMENTUM_MAX_INTERVAL_MS", 650)
+        ),
         ...momentumNotional
       },
       meanReversion: {

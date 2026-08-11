@@ -1,4 +1,5 @@
 import { BotKind, OrderSide } from "../constants.js";
+import { randomInt } from "../domain/math.js";
 import type { MarketSnapshot, OrderDraft, Rng, RuntimeConfig } from "../types.js";
 import type { OrderRouter } from "../io/OrderRouter.js";
 import {
@@ -14,7 +15,8 @@ const MOMENTUM_CONSECUTIVE_MOVES = 30;
 const MOMENTUM_REQUIRED_PRICE_COUNT = MOMENTUM_CONSECUTIVE_MOVES + 1;
 
 export class MomentumBot implements BotRunner {
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private running = false;
   private busy = false;
   private activeTrend: ActiveMomentumTrend | null = null;
   private readonly rng: Rng;
@@ -29,14 +31,14 @@ export class MomentumBot implements BotRunner {
   }
 
   start(): void {
-    this.timer = setInterval(() => {
-      void this.tick();
-    }, this.config.bots.momentum.intervalMs);
+    this.running = true;
+    this.scheduleNext();
   }
 
   stop(): void {
+    this.running = false;
     if (this.timer) {
-      clearInterval(this.timer);
+      clearTimeout(this.timer);
       this.timer = null;
     }
 
@@ -141,6 +143,23 @@ export class MomentumBot implements BotRunner {
     } finally {
       this.busy = false;
     }
+  }
+
+  private scheduleNext(): void {
+    if (!this.running) {
+      return;
+    }
+
+    const delayMs = randomInt(
+      this.config.bots.momentum.minIntervalMs,
+      this.config.bots.momentum.maxIntervalMs,
+      this.rng
+    );
+    this.timer = setTimeout(() => {
+      void this.tick().finally(() => {
+        this.scheduleNext();
+      });
+    }, delayMs);
   }
 
   private updateActivity(nextTrend: ActiveMomentumTrend | null, snapshot: MarketSnapshot, fairPrice: number): void {

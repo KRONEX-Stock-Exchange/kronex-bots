@@ -47,7 +47,8 @@ function config(overrides: Partial<RuntimeConfig> = {}): RuntimeConfig {
     bots: {
       marketMaker: {
         checkIntervalMs: 100,
-        orderIntervalMs: 150,
+        minOrderIntervalMs: 150,
+        maxOrderIntervalMs: 150,
         minNotional: 2_000_000,
         maxNotional: 10_000_000
       },
@@ -61,7 +62,8 @@ function config(overrides: Partial<RuntimeConfig> = {}): RuntimeConfig {
         fullBiasDivergencePct: 5
       },
       momentum: {
-        intervalMs: 450,
+        minIntervalMs: 450,
+        maxIntervalMs: 450,
         minNotional: 7_500,
         maxNotional: 2_500_000
       },
