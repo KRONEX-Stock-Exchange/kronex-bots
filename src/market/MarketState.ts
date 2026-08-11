@@ -2,6 +2,52 @@ import { OrderSide, type OrderSide as OrderSideValue } from "../constants.js";
 import { asRecord, toNonNegativeNumber, toPositiveNumber } from "../domain/math.js";
 import type { KronexStock, MarketSnapshot, OrderBookLevel } from "../types.js";
 
+const BUY_ORDER_BOOK_KEYS = [
+  "bids",
+  "bidLevels",
+  "buy",
+  "buys",
+  "buyOrders",
+  "bidOrders",
+  "buyOrderBook",
+  "buyOrderbook",
+  "buyOrderBooks",
+  "buyOrderbooks",
+  "bidOrderBook",
+  "bidOrderbook",
+  "bidOrderBooks",
+  "bidOrderbooks",
+  "buyBook",
+  "buybook",
+  "bidBook",
+  "bidbook",
+  "bid"
+] as const;
+
+const SELL_ORDER_BOOK_KEYS = [
+  "asks",
+  "askLevels",
+  "sell",
+  "sells",
+  "sellOrders",
+  "askOrders",
+  "sellOrderBook",
+  "sellOrderbook",
+  "sellOrderBooks",
+  "sellOrderbooks",
+  "askOrderBook",
+  "askOrderbook",
+  "askOrderBooks",
+  "askOrderbooks",
+  "sellBook",
+  "sellbook",
+  "askBook",
+  "askbook",
+  "ask"
+] as const;
+
+const ORDER_BOOK_SIDE_KEYS = [...BUY_ORDER_BOOK_KEYS, ...SELL_ORDER_BOOK_KEYS] as const;
+
 export class MarketState {
   private static readonly priceHistoryLimit = 31;
   private lastPrice: number | null = null;
@@ -39,10 +85,12 @@ export class MarketState {
       return false;
     }
 
-    if (price !== null) {
+    if (price !== null && !this.isOutsideKnownPriceLimits(price)) {
       this.updateLastPrice(price);
-    } else {
+    } else if (priceLimitUpdated) {
       this.updatedAt = Date.now();
+    } else {
+      return false;
     }
 
     return true;
@@ -60,7 +108,7 @@ export class MarketState {
     const bids = this.aggregateLevels(this.extractLevels(data, OrderSide.BUY));
     const asks = this.aggregateLevels(this.extractLevels(data, OrderSide.SELL));
 
-    if (bids.length === 0 && asks.length === 0) {
+    if (bids.length === 0 && asks.length === 0 && !this.hasOrderBookShape(data)) {
       return false;
     }
 
@@ -139,6 +187,11 @@ export class MarketState {
     return updated;
   }
 
+  private isOutsideKnownPriceLimits(price: number): boolean {
+    return (this.upperLimitPrice !== null && price > this.upperLimitPrice)
+      || (this.lowerLimitPrice !== null && price < this.lowerLimitPrice);
+  }
+
   private extractUpperLimitPrice(data: unknown): number | null {
     const record = asRecord(data);
     if (!record) {
@@ -192,51 +245,22 @@ export class MarketState {
     );
   }
 
+  private hasOrderBookShape(data: unknown): boolean {
+    const record = asRecord(data);
+    if (!record) {
+      return false;
+    }
+
+    return ORDER_BOOK_SIDE_KEYS.some((key) => {
+      const value = record[key];
+      return Array.isArray(value) || asRecord(value) !== null;
+    });
+  }
+
   private extractLevels(data: unknown, side: OrderSideValue): OrderBookLevel[] {
     const record = asRecord(data);
-    const candidates = side === OrderSide.BUY
-      ? [
-        record?.bids,
-        record?.bidLevels,
-        record?.buy,
-        record?.buys,
-        record?.buyOrders,
-        record?.bidOrders,
-        record?.buyOrderBook,
-        record?.buyOrderbook,
-        record?.buyOrderBooks,
-        record?.buyOrderbooks,
-        record?.bidOrderBook,
-        record?.bidOrderbook,
-        record?.bidOrderBooks,
-        record?.bidOrderbooks,
-        record?.buyBook,
-        record?.buybook,
-        record?.bidBook,
-        record?.bidbook,
-        record?.bid
-      ]
-      : [
-        record?.asks,
-        record?.askLevels,
-        record?.sell,
-        record?.sells,
-        record?.sellOrders,
-        record?.askOrders,
-        record?.sellOrderBook,
-        record?.sellOrderbook,
-        record?.sellOrderBooks,
-        record?.sellOrderbooks,
-        record?.askOrderBook,
-        record?.askOrderbook,
-        record?.askOrderBooks,
-        record?.askOrderbooks,
-        record?.sellBook,
-        record?.sellbook,
-        record?.askBook,
-        record?.askbook,
-        record?.ask
-      ];
+    const keys = side === OrderSide.BUY ? BUY_ORDER_BOOK_KEYS : SELL_ORDER_BOOK_KEYS;
+    const candidates = keys.map((key) => record?.[key]);
 
     return candidates
       .flatMap((candidate) => this.collectRawLevels(candidate, side))

@@ -53,6 +53,8 @@ FairPrice는 상한가/하한가 밖으로 움직일 수 있다.
 - 매수 지정가는 현재가 이하의 비어있는 호가에만 생성한다.
 - 매도 지정가는 현재가 이상의 비어있는 호가에만 생성한다.
 - 매수 호가와 매도 호가는 각각 독립적으로 관리한다.
+- 같은 가격에 반대 방향 주문이 있어도 해당 방향 호가가 비어 있으면 주문을 생성한다.
+- 실시간 서버가 매수/매도 호가를 모두 빈 배열로 보내면 기존 호가를 전부 비운 최신 스냅샷으로 적용한다.
 - 비어있는 매수 호가는 항상 매수 주문으로 채운다.
 - 비어있는 매도 호가는 항상 매도 주문으로 채운다.
 - FairPrice가 현재가보다 **0.5% 이상 높으면** 매수 호가를 우선적으로 채운다.
@@ -157,10 +159,13 @@ FairPrice는 상한가/하한가 밖으로 움직일 수 있다.
 - 지정가 주문의 주문가격은 지정가 가격을 사용한다.
 - `stockInfoUpdated` 이벤트의 `upperLimit`, `lowerLimit`은 수신할 때마다 현재 상한가/하한가로 갱신한다.
 - 이벤트에 상한가/하한가 필드가 없으면 기존 값을 유지한다.
+- 새 현재가가 기존 상한가/하한가를 벗어나면 새 제한값이 함께 수신될 때까지 해당 현재가 갱신을 보류한다.
 - 주문가격이 상한가보다 높거나 하한가보다 낮으면 주문을 생성하지 않는다.
 - 현재가가 상한가에 도달하면 매수 주문을 생성하지 않는다.
 - 현재가가 하한가에 도달하면 매도 주문을 생성하지 않는다.
 - 상한가/하한가에서 한쪽 주문이 막힌 상태라도 허용 가능한 반대 주문은 생성할 수 있다.
+- REST API 요청이 `BOT_API_REQUEST_TIMEOUT_MS` 안에 끝나지 않으면 요청을 중단하고 다음 주문 주기에 다시 시도한다.
+- 실행 중 자식 봇 프로세스가 비정상 종료되면 해당 종목의 해당 봇만 1초 후 자동으로 다시 실행한다.
 
 ### 환경변수 튜닝
 
@@ -168,6 +173,7 @@ FairPrice는 상한가/하한가 밖으로 움직일 수 있다.
 - 병렬 실행 종목: `BOT_STOCK_IDS`
 - 랜덤 시드와 FairPrice 시작 지연: `BOT_RANDOM_SEED`, `BOT_FAIR_START_JITTER_MS`, `BOT_FAIR_EVENT_START_JITTER_MS`
 - 공통 주문금액 스케일: `BOT_ORDER_REFERENCE_PRICE`, `BOT_ORDER_PRICE_DECAY_EXPONENT`, `BOT_MAX_ORDER_NOTIONAL`
+- REST API 제한시간: `BOT_API_REQUEST_TIMEOUT_MS`
 - MarketMaker: `BOT_MM_CHECK_INTERVAL_MS`, `BOT_MM_MIN_ORDER_INTERVAL_MS`, `BOT_MM_MAX_ORDER_INTERVAL_MS`, `BOT_MM_MIN_ORDER_NOTIONAL`, `BOT_MM_MAX_ORDER_NOTIONAL`
 - NoiseTaker: `BOT_NOISE_MIN_INTERVAL_MS`, `BOT_NOISE_MAX_INTERVAL_MS`, `BOT_NOISE_MIN_ORDER_NOTIONAL`, `BOT_NOISE_MAX_ORDER_NOTIONAL`, `BOT_NOISE_MIN_SIDE_PROBABILITY_PCT`, `BOT_NOISE_MAX_SIDE_PROBABILITY_PCT`, `BOT_NOISE_FULL_BIAS_DIVERGENCE_PCT`
 - MomentumBot: `BOT_MOMENTUM_MIN_INTERVAL_MS`, `BOT_MOMENTUM_MAX_INTERVAL_MS`, `BOT_MOMENTUM_MIN_ORDER_NOTIONAL`, `BOT_MOMENTUM_MAX_ORDER_NOTIONAL`

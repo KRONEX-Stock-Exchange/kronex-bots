@@ -47,6 +47,25 @@ test("market state refreshes price limits from every stock info update", () => {
   assert.equal(market.getSnapshot().lowerLimitPrice, 5_100);
 });
 
+test("market state waits for refreshed limits before accepting an out-of-range price", () => {
+  const market = new MarketState(1);
+  market.initializeFromStock({ id: 1, price: "20000", upperLimit: "20000", lowerLimit: "10000" });
+
+  assert.equal(market.applyStockInfoUpdated({ id: 1, price: "20050" }), false);
+  assert.equal(market.getSnapshot().lastPrice, 20_000);
+  assert.equal(market.getSnapshot().upperLimitPrice, 20_000);
+
+  assert.equal(market.applyStockInfoUpdated({
+    id: 1,
+    price: "20050",
+    upperLimit: "30000",
+    lowerLimit: "15000"
+  }), true);
+  assert.equal(market.getSnapshot().lastPrice, 20_050);
+  assert.equal(market.getSnapshot().upperLimitPrice, 30_000);
+  assert.equal(market.getSnapshot().lowerLimitPrice, 15_000);
+});
+
 test("market state parses nested order book updates and aggregates duplicate prices", () => {
   const market = new MarketState(1);
   market.initializeFromStock({ id: 1, price: "10000" });
@@ -98,6 +117,33 @@ test("market state accepts realtime server orderBookUpdated payload shape", () =
   assert.equal(snapshot.bids[0]?.quantity, 3);
   assert.equal(snapshot.asks[0]?.price, 19_490);
   assert.equal(snapshot.asks[0]?.quantity, 4);
+});
+
+test("market state applies a fully empty order book snapshot", () => {
+  const market = new MarketState(1);
+  market.initializeFromStock({ id: 1, price: "20000" });
+  assert.equal(market.applyOrderBookUpdated({
+    buyOrderbook: [{ price: "20000", quantity: "1000" }],
+    sellOrderbook: [{ price: "20050", quantity: "10" }]
+  }), true);
+
+  assert.equal(market.applyOrderBookUpdated({ buyOrderbook: [], sellOrderbook: [] }), true);
+  const snapshot = market.getSnapshot();
+  assert.deepEqual(snapshot.bids, []);
+  assert.deepEqual(snapshot.asks, []);
+  assert.equal(snapshot.hasOrderBook, false);
+});
+
+test("market state does not clear the book for an unrecognized empty payload", () => {
+  const market = new MarketState(1);
+  market.initializeFromStock({ id: 1, price: "20000" });
+  assert.equal(market.applyOrderBookUpdated({
+    buyOrderbook: [{ price: "20000", quantity: "1000" }],
+    sellOrderbook: []
+  }), true);
+
+  assert.equal(market.applyOrderBookUpdated({ data: { stockId: 1, unrelated: [] } }), false);
+  assert.equal(market.getSnapshot().bids[0]?.price, 20_000);
 });
 
 test("market state ignores updates for other stock ids", () => {

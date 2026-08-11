@@ -21,6 +21,8 @@ type FairPriceMovement = {
   divergencePct?: number;
 };
 
+const BOT_PROCESS_RESTART_DELAY_MS = 1_000;
+
 class StockRuntime {
   private readonly logger: JsonlLogger;
   private readonly marketState: MarketState;
@@ -28,6 +30,7 @@ class StockRuntime {
   private readonly fairPriceEventWorker: FairPriceEventWorker;
   private readonly socketClient: KronexSocketClient;
   private readonly children = new Map<BotKind, ChildProcess>();
+  private readonly botRestartTimers = new Map<BotKind, ReturnType<typeof setTimeout>>();
   private fairPriceTimer: ReturnType<typeof setInterval> | null = null;
   private fairPriceEventTimer: ReturnType<typeof setInterval> | null = null;
   private broadcastTimer: ReturnType<typeof setInterval> | null = null;
@@ -35,6 +38,7 @@ class StockRuntime {
   private readonly fairPriceEventSeed: string;
   private readonly fairPriceStartJitterMs: number;
   private readonly fairPriceEventStartJitterMs: number;
+  private stopping = false;
 
   constructor(private readonly config: RuntimeConfig, logger: JsonlLogger) {
     this.logger = logger;
@@ -86,8 +90,18 @@ class StockRuntime {
   }
 
   async stop(reason: string): Promise<void> {
+    if (this.stopping) {
+      return;
+    }
+
+    this.stopping = true;
     this.clearTimers();
     this.socketClient.disconnect();
+
+    for (const timer of this.botRestartTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.botRestartTimers.clear();
 
     for (const child of this.children.values()) {
       if (child.connected) {
@@ -107,23 +121,51 @@ class StockRuntime {
   }
 
   private spawnBots(): void {
-    const childPath = fileURLToPath(new URL("./processes/botProcess.js", import.meta.url));
-
     for (const kind of BOT_KINDS) {
-      const processSeed = deriveSeed(this.config.random.seed, "stock", this.config.stockId, "bot", kind);
-      const child = fork(childPath, [kind, String(this.config.stockId)], {
-        stdio: ["inherit", "inherit", "inherit", "ipc"],
-        env: {
-          ...process.env,
-          BOT_PROCESS_RANDOM_SEED: processSeed
-        }
-      });
-
-      this.children.set(kind, child);
-      child.on("exit", (code, signal) => {
-        // void this.logger.log("bot_process_exited", { botKind: kind, code, signal });
-      });
+      this.spawnBot(kind);
     }
+  }
+
+  private spawnBot(kind: BotKind): void {
+    if (this.stopping) {
+      return;
+    }
+
+    const childPath = fileURLToPath(new URL("./processes/botProcess.js", import.meta.url));
+    const processSeed = deriveSeed(this.config.random.seed, "stock", this.config.stockId, "bot", kind);
+    const child = fork(childPath, [kind, String(this.config.stockId)], {
+      stdio: ["inherit", "inherit", "inherit", "ipc"],
+      env: {
+        ...process.env,
+        BOT_PROCESS_RANDOM_SEED: processSeed
+      }
+    });
+
+    this.children.set(kind, child);
+    child.on("error", (error) => {
+      console.error(
+        `[StockRuntime] bot process error stockId=${this.config.stockId} botKind=${kind} message=${error.message}`
+      );
+    });
+    child.on("exit", (code, signal) => {
+      if (this.children.get(kind) !== child) {
+        return;
+      }
+
+      this.children.delete(kind);
+      if (this.stopping) {
+        return;
+      }
+
+      console.warn(
+        `[StockRuntime] bot exited stockId=${this.config.stockId} botKind=${kind} code=${code ?? "n/a"} signal=${signal ?? "n/a"} restartIn=${BOT_PROCESS_RESTART_DELAY_MS}ms`
+      );
+      const restartTimer = setTimeout(() => {
+        this.botRestartTimers.delete(kind);
+        this.spawnBot(kind);
+      }, BOT_PROCESS_RESTART_DELAY_MS);
+      this.botRestartTimers.set(kind, restartTimer);
+    });
   }
 
   private startTimers(): void {

@@ -52,6 +52,7 @@ export interface RuntimeConfig {
   stockId: number;
   stockIds: number[];
   apiBaseUrl: string;
+  apiRequestTimeoutMs: number;
   wsUrl: string;
   accessToken: string;
   logFilePath: string;

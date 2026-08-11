@@ -7,9 +7,9 @@ import { MarketMakerBot } from "../src/bots/MarketMakerBot.js";
 import { NoiseTakerBot } from "../src/bots/NoiseTakerBot.js";
 import { MomentumBot } from "../src/bots/MomentumBot.js";
 import { MeanReversionBot } from "../src/bots/MeanReversionBot.js";
+import { KronexApiClient } from "../src/io/KronexApiClient.js";
 import type { MarketSnapshot, RuntimeConfig } from "../src/types.js";
 import type { OrderRouter as OrderRouterType } from "../src/io/OrderRouter.js";
-import type { KronexApiClient } from "../src/io/KronexApiClient.js";
 import type { JsonlLogger } from "../src/io/JsonlLogger.js";
 
 function config(overrides: Partial<RuntimeConfig> = {}): RuntimeConfig {
@@ -17,6 +17,7 @@ function config(overrides: Partial<RuntimeConfig> = {}): RuntimeConfig {
     stockId: 1,
     stockIds: [1],
     apiBaseUrl: "http://localhost:3000/api",
+    apiRequestTimeoutMs: 5_000,
     wsUrl: "ws://localhost:3001/stock",
     accessToken: "token",
     logFilePath: "/tmp/kronex-bots-test.jsonl",
@@ -139,8 +140,39 @@ test("market maker walks empty quote levels once instead of repeating one price"
   assert.deepEqual(orders.slice(0, 3).map((order) => order?.price), [10_000, 9_990, 9_980]);
   assert.equal(orders[9]?.price, 9_910);
   assert.equal(orders[10]?.side, OrderSide.SELL);
-  assert.equal(orders[10]?.price, 10_010);
-  assert.equal(orders[11]?.price, 10_020);
+  assert.equal(orders[10]?.price, 10_000);
+  assert.equal(orders[11]?.price, 10_010);
+});
+
+test("market maker tracks visible and reserved prices independently by side", () => {
+  const upperMaker = new MarketMakerBot(config(), fakeRouter, () => ({ snapshot: null, fairPrice: null }), () => 0);
+  const upperOrder = upperMaker.createOrder(snapshot({
+    lastPrice: 20_000,
+    upperLimitPrice: 20_000,
+    lowerLimitPrice: 10_000,
+    bids: [{ price: 20_000, quantity: 1_000 }],
+    asks: []
+  }), 18_000);
+  assert.equal(upperOrder?.side, OrderSide.SELL);
+  assert.equal(upperOrder?.price, 20_000);
+
+  const lowerMaker = new MarketMakerBot(config(), fakeRouter, () => ({ snapshot: null, fairPrice: null }), () => 0);
+  const lowerOrder = lowerMaker.createOrder(snapshot({
+    lastPrice: 5_000,
+    upperLimitPrice: 10_000,
+    lowerLimitPrice: 5_000,
+    bids: [],
+    asks: [{ price: 5_000, quantity: 1_000 }]
+  }), 6_000);
+  assert.equal(lowerOrder?.side, OrderSide.BUY);
+  assert.equal(lowerOrder?.price, 5_000);
+
+  const reservationMaker = new MarketMakerBot(config(), fakeRouter, () => ({ snapshot: null, fairPrice: null }), () => 0);
+  const emptySnapshot = snapshot({ bids: [], asks: [], hasOrderBook: false });
+  assert.equal(reservationMaker.createOrder(emptySnapshot, 10_100)?.side, OrderSide.BUY);
+  const oppositeSideOrder = reservationMaker.createOrder(emptySnapshot, 9_900);
+  assert.equal(oppositeSideOrder?.side, OrderSide.SELL);
+  assert.equal(oppositeSideOrder?.price, 10_000);
 });
 
 test("market maker returns no order until it has a current price", () => {
@@ -389,6 +421,25 @@ test("order router rejects orders before price limits are known", () => {
   });
 });
 
+test("order router rejects inverted price limits as unknown", () => {
+  const router = new OrderRouter(config(), fakeApiClient, fakeLogger);
+  const order = createOrderDraft({
+    stockId: 1,
+    botKind: BotKind.NOISE_TAKER,
+    side: OrderSide.BUY,
+    orderType: OrderType.MARKET,
+    price: 10_000,
+    quantity: 1,
+    referencePrice: 10_000,
+    reason: "inverted_limits"
+  });
+
+  assert.deepEqual(router.validate(order, snapshot({ upperLimitPrice: 9_000, lowerLimitPrice: 11_000 })), {
+    valid: false,
+    reason: "price_limits_unknown"
+  });
+});
+
 test("order router rejects price limit violations and blocked limit sides", () => {
   const router = new OrderRouter(config(), fakeApiClient, fakeLogger);
   const upperSnapshot = snapshot({
@@ -458,4 +509,28 @@ test("order router rejects price limit violations and blocked limit sides", () =
     valid: false,
     reason: "price_below_lower_limit"
   });
+});
+
+test("api client aborts an order request after the configured timeout", async () => {
+  const hangingFetch: typeof fetch = (_input, init) => new Promise<Response>((_resolve, reject) => {
+    const signal = init?.signal;
+    assert.ok(signal);
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+  const apiClient = new KronexApiClient(config({ apiRequestTimeoutMs: 5 }), hangingFetch);
+
+  const response = await apiClient.sendOrder({
+    stockId: 1,
+    side: OrderSide.BUY,
+    payload: {
+      accountNumber: 10001,
+      price: 10_000,
+      quantity: 1,
+      orderType: OrderType.MARKET
+    }
+  });
+
+  assert.equal(response.ok, false);
+  assert.equal(response.status, "network_error");
+  assert.match(String((response.body as { message?: unknown }).message), /timeout|aborted/i);
 });

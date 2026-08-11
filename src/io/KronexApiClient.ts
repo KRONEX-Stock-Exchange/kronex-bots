@@ -18,6 +18,7 @@ export class KronexApiClient {
   async fetchStocks(): Promise<KronexStock[]> {
     const response = await this.fetchImpl(`${this.config.apiBaseUrl}/stocks`, {
       method: "GET",
+      signal: this.createRequestSignal(),
       headers: {
         Accept: "application/json"
       }
@@ -51,6 +52,7 @@ export class KronexApiClient {
         `${this.config.apiBaseUrl}/stocks/${input.stockId}/orders/${sidePath}`,
         {
           method: "POST",
+          signal: this.createRequestSignal(),
           headers: {
             Authorization: `Bearer ${this.config.accessToken}`,
             "Content-Type": "application/json"
@@ -73,6 +75,10 @@ export class KronexApiClient {
         }
       };
     }
+  }
+
+  private createRequestSignal(): AbortSignal {
+    return AbortSignal.timeout(this.config.apiRequestTimeoutMs);
   }
 
   private async parseJson(response: Response): Promise<unknown> {

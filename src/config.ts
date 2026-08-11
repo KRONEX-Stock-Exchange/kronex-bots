@@ -163,6 +163,7 @@ export function loadConfig(): RuntimeConfig {
     stockId: stockIds[0],
     stockIds,
     apiBaseUrl: stringEnv("KRONEX_API_BASE_URL", "http://localhost:3000/api"),
+    apiRequestTimeoutMs: positiveNumberEnv("BOT_API_REQUEST_TIMEOUT_MS", 5_000),
     wsUrl: stringEnv("KRONEX_WS_URL", "ws://localhost:3001/stock"),
     accessToken: stringEnv("BOT_ACCESS_TOKEN", ""),
     logFilePath: stringEnv("BOT_LOG_FILE", "logs/bot-events.jsonl"),

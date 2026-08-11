@@ -12,7 +12,13 @@ export type PriceLimitSideBlockReason =
 export type PriceLimitState = "NORMAL" | "AT_UPPER" | "AT_LOWER" | "LOCKED";
 
 export function hasPriceLimits(snapshot: MarketSnapshot): boolean {
-  return snapshot.upperLimitPrice !== null && snapshot.lowerLimitPrice !== null;
+  return snapshot.upperLimitPrice !== null
+    && snapshot.lowerLimitPrice !== null
+    && Number.isFinite(snapshot.upperLimitPrice)
+    && Number.isFinite(snapshot.lowerLimitPrice)
+    && snapshot.upperLimitPrice > 0
+    && snapshot.lowerLimitPrice > 0
+    && snapshot.lowerLimitPrice <= snapshot.upperLimitPrice;
 }
 
 export function priceLimitViolation(price: number, snapshot: MarketSnapshot): PriceLimitViolationReason | null {
