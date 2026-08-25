@@ -1,4 +1,5 @@
 import { ALLOWED_ORDER_TYPE_BY_BOT, OrderSide, OrderType } from "../constants.js";
+import { isMarketClosed } from "../domain/marketHours.js";
 import { maxOrderNotionalForReferencePrice } from "../domain/orderSizing.js";
 import { hasPriceLimits, priceLimitSideBlockReason, priceLimitViolation } from "../domain/priceLimits.js";
 import { isAlignedToTick } from "../domain/tickSize.js";
@@ -56,7 +57,11 @@ export class OrderRouter {
     return response;
   }
 
-  validate(order: OrderDraft, snapshot: MarketSnapshot): OrderValidationResult {
+  validate(order: OrderDraft, snapshot: MarketSnapshot, now: number = Date.now()): OrderValidationResult {
+    if (isMarketClosed(now)) {
+      return { valid: false, reason: "market_closed" };
+    }
+
     if (order.stockId !== this.config.stockId || snapshot.stockId !== this.config.stockId) {
       return { valid: false, reason: "stock_id_mismatch" };
     }

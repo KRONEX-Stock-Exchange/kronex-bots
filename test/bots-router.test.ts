@@ -3,6 +3,7 @@ import test from "node:test";
 import { BotKind, OrderSide, OrderType } from "../src/constants.js";
 import { createOrderDraft } from "../src/domain/orderSizing.js";
 import { OrderRouter } from "../src/io/OrderRouter.js";
+import { getReadyState } from "../src/bots/BotRuntime.js";
 import { MarketMakerBot } from "../src/bots/MarketMakerBot.js";
 import { NoiseTakerBot } from "../src/bots/NoiseTakerBot.js";
 import { MomentumBot } from "../src/bots/MomentumBot.js";
@@ -93,6 +94,9 @@ function snapshot(overrides: Partial<MarketSnapshot> = {}): MarketSnapshot {
     ...overrides
   };
 }
+
+const OPEN_MARKET_TIME = Date.UTC(2026, 0, 1, 3, 30);
+const CLOSED_MARKET_TIME = Date.UTC(2026, 0, 1, 0, 3);
 
 const fakeRouter = {
   async route(): Promise<null> {
@@ -316,7 +320,7 @@ test("high priced orders decay smoothly instead of keeping low-price share count
     reason: "too_many_high_price_shares"
   });
 
-  assert.deepEqual(router.validate(tooManyHighPriceShares, snapshot({ lastPrice: 3_000_000 })), {
+  assert.deepEqual(router.validate(tooManyHighPriceShares, snapshot({ lastPrice: 3_000_000 }), OPEN_MARKET_TIME), {
     valid: false,
     reason: "hard_notional_limit_exceeded"
   });
@@ -358,7 +362,7 @@ test("order router builds the side-specific account payload for market orders", 
     reason: "test"
   });
 
-  assert.deepEqual(router.validate(order, snapshot()), {
+  assert.deepEqual(router.validate(order, snapshot(), OPEN_MARKET_TIME), {
     valid: true,
     payload: {
       accountNumber: 10002,
@@ -392,11 +396,11 @@ test("order router rejects mismatched bot order type and hard cap overflow", () 
     reason: "too_large"
   });
 
-  assert.deepEqual(router.validate(wrongType, snapshot()), {
+  assert.deepEqual(router.validate(wrongType, snapshot(), OPEN_MARKET_TIME), {
     valid: false,
     reason: "bot_order_type_not_allowed"
   });
-  assert.deepEqual(router.validate(tooLarge, snapshot()), {
+  assert.deepEqual(router.validate(tooLarge, snapshot(), OPEN_MARKET_TIME), {
     valid: false,
     reason: "hard_notional_limit_exceeded"
   });
@@ -415,7 +419,7 @@ test("order router rejects orders before price limits are known", () => {
     reason: "limits_unknown"
   });
 
-  assert.deepEqual(router.validate(order, snapshot({ upperLimitPrice: null, lowerLimitPrice: null })), {
+  assert.deepEqual(router.validate(order, snapshot({ upperLimitPrice: null, lowerLimitPrice: null }), OPEN_MARKET_TIME), {
     valid: false,
     reason: "price_limits_unknown"
   });
@@ -434,7 +438,7 @@ test("order router rejects inverted price limits as unknown", () => {
     reason: "inverted_limits"
   });
 
-  assert.deepEqual(router.validate(order, snapshot({ upperLimitPrice: 9_000, lowerLimitPrice: 11_000 })), {
+  assert.deepEqual(router.validate(order, snapshot({ upperLimitPrice: 9_000, lowerLimitPrice: 11_000 }), OPEN_MARKET_TIME), {
     valid: false,
     reason: "price_limits_unknown"
   });
@@ -493,19 +497,19 @@ test("order router rejects price limit violations and blocked limit sides", () =
     reason: "below_lower"
   });
 
-  assert.deepEqual(router.validate(upperBuy, upperSnapshot), {
+  assert.deepEqual(router.validate(upperBuy, upperSnapshot, OPEN_MARKET_TIME), {
     valid: false,
     reason: "upper_limit_buy_blocked"
   });
-  assert.deepEqual(router.validate(lowerSell, lowerSnapshot), {
+  assert.deepEqual(router.validate(lowerSell, lowerSnapshot, OPEN_MARKET_TIME), {
     valid: false,
     reason: "lower_limit_sell_blocked"
   });
-  assert.deepEqual(router.validate(aboveUpper, upperSnapshot), {
+  assert.deepEqual(router.validate(aboveUpper, upperSnapshot, OPEN_MARKET_TIME), {
     valid: false,
     reason: "price_above_upper_limit"
   });
-  assert.deepEqual(router.validate(belowLower, upperSnapshot), {
+  assert.deepEqual(router.validate(belowLower, upperSnapshot, OPEN_MARKET_TIME), {
     valid: false,
     reason: "price_below_lower_limit"
   });
@@ -533,4 +537,31 @@ test("api client aborts an order request after the configured timeout", async ()
   assert.equal(response.ok, false);
   assert.equal(response.status, "network_error");
   assert.match(String((response.body as { message?: unknown }).message), /timeout|aborted/i);
+});
+
+test("order router blocks every order during the utc market close window", () => {
+  const router = new OrderRouter(config(), fakeApiClient, fakeLogger);
+  const order = createOrderDraft({
+    stockId: 1,
+    botKind: BotKind.NOISE_TAKER,
+    side: OrderSide.SELL,
+    orderType: OrderType.MARKET,
+    price: 10_000,
+    quantity: 2,
+    referencePrice: 10_000,
+    reason: "closed_window"
+  });
+
+  assert.deepEqual(router.validate(order, snapshot(), CLOSED_MARKET_TIME), {
+    valid: false,
+    reason: "market_closed"
+  });
+  assert.equal(router.validate(order, snapshot(), OPEN_MARKET_TIME).valid, true);
+});
+
+test("bots see no ready state during the utc market close window", () => {
+  const getState = () => ({ snapshot: snapshot(), fairPrice: 10_100 });
+
+  assert.equal(getReadyState(getState, CLOSED_MARKET_TIME), null);
+  assert.ok(getReadyState(getState, OPEN_MARKET_TIME));
 });

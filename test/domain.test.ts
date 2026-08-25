@@ -17,6 +17,7 @@ import {
   normalizeLimitPrice,
   pricesAroundCurrentPrice
 } from "../src/domain/tickSize.js";
+import { isMarketClosed } from "../src/domain/marketHours.js";
 import { createSeededRng, deriveSeed } from "../src/domain/random.js";
 
 test("tick size follows Kronex market bands", () => {
@@ -221,4 +222,13 @@ test("random target notional scales with reference price decay", () => {
 
   assert.equal(lowPriceTarget, 1_500_000);
   assert.equal(highPriceTarget, 2_992_893);
+});
+
+test("market close window covers utc 00:00 to 00:05 only", () => {
+  assert.equal(isMarketClosed(Date.UTC(2026, 0, 1, 0, 0, 0)), true);
+  assert.equal(isMarketClosed(Date.UTC(2026, 0, 1, 0, 4, 59, 999)), true);
+  assert.equal(isMarketClosed(Date.UTC(2026, 0, 1, 0, 5, 0)), false);
+  assert.equal(isMarketClosed(Date.UTC(2026, 0, 1, 23, 59, 59, 999)), false);
+  assert.equal(isMarketClosed(Date.UTC(2026, 0, 1, 12, 0, 0)), false);
+  assert.equal(isMarketClosed(new Date(Date.UTC(2026, 0, 1, 0, 1))), true);
 });

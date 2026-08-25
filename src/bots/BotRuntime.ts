@@ -8,6 +8,7 @@ import {
   quantityForNotional,
   randomTargetNotional
 } from "../domain/orderSizing.js";
+import { isMarketClosed } from "../domain/marketHours.js";
 import { hasPriceLimits, priceLimitSideBlockReason } from "../domain/priceLimits.js";
 import type { MarketSnapshot, OrderDraft, Rng, RuntimeConfig } from "../types.js";
 import type { OrderRouter } from "../io/OrderRouter.js";
@@ -31,7 +32,14 @@ export interface BotDeps {
   rng?: Rng;
 }
 
-export function getReadyState(getState: BotStateGetter): { snapshot: MarketSnapshot; fairPrice: number } | null {
+export function getReadyState(
+  getState: BotStateGetter,
+  now: number = Date.now()
+): { snapshot: MarketSnapshot; fairPrice: number } | null {
+  if (isMarketClosed(now)) {
+    return null;
+  }
+
   const state = getState();
   if (
     state.snapshot?.lastPrice === null
