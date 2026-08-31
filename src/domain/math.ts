@@ -12,6 +12,10 @@ export function randomNumber(min: number, max: number, rng: () => number = Math.
   return min + rng() * (max - min);
 }
 
+export function volatilityDragOffsetPct(minPct: number, maxPct: number): number {
+  return ((maxPct - minPct) ** 2) / 2400;
+}
+
 export function toNumber(value: unknown): number | null {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : null;

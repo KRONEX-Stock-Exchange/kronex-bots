@@ -1,4 +1,4 @@
-import { randomNumber } from "./math.js";
+import { randomNumber, volatilityDragOffsetPct } from "./math.js";
 import type { FairPriceEventConfig, Rng } from "../types.js";
 
 export interface FairPriceEventUpdate {
@@ -23,7 +23,13 @@ export class FairPriceEventWorker {
       throw new Error(`invalid fair price for event worker: ${currentFairPrice}`);
     }
 
-    const eventRatePct = randomNumber(this.config.minRatePct, this.config.maxRatePct, this.rng);
+    // See FairPriceWorker.update: offset counters the same volatility-drag decay.
+    const offsetPct = volatilityDragOffsetPct(this.config.minRatePct, this.config.maxRatePct);
+    const eventRatePct = randomNumber(
+      this.config.minRatePct + offsetPct,
+      this.config.maxRatePct + offsetPct,
+      this.rng
+    );
     const nextFairPrice = Math.max(1, currentFairPrice * (1 + eventRatePct / 100));
     const fairPriceChange = nextFairPrice - currentFairPrice;
 

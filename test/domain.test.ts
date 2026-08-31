@@ -3,6 +3,7 @@ import test from "node:test";
 import { OrderSide } from "../src/constants.js";
 import { FairPriceEventWorker } from "../src/domain/fairPriceEvent.js";
 import { FairPriceWorker } from "../src/domain/fairPrice.js";
+import { volatilityDragOffsetPct } from "../src/domain/math.js";
 import {
   hardMaxNotionalFromEnv,
   maxOrderNotionalForReferencePrice,
@@ -82,18 +83,26 @@ test("fair price is not corrected toward current price past thirty percent diver
   assert.equal(update.divergencePct, 300);
 });
 
-test("fair price random delta percent follows configured min and max", () => {
+test("fair price random delta percent follows configured min and max, shifted by the volatility-drag offset", () => {
+  const offsetPct = volatilityDragOffsetPct(-20, 40);
+
   const minWorker = new FairPriceWorker({ intervalMs: 500, randomDeltaMinPct: -20, randomDeltaMaxPct: 40 }, () => 0);
   minWorker.initialize(1_000);
   const minUpdate = minWorker.update(1_000);
-  assert.equal(minUpdate.randomDeltaPct, -20);
-  assert.equal(minUpdate.fairPrice, 800);
+  assert.equal(minUpdate.randomDeltaPct, -20 + offsetPct);
+  assert.equal(minUpdate.fairPrice, 1_000 * (1 + (-20 + offsetPct) / 100));
 
   const maxWorker = new FairPriceWorker({ intervalMs: 500, randomDeltaMinPct: -20, randomDeltaMaxPct: 40 }, () => 1);
   maxWorker.initialize(1_000);
   const maxUpdate = maxWorker.update(1_000);
-  assert.equal(maxUpdate.randomDeltaPct, 40);
-  assert.equal(maxUpdate.fairPrice, 1_400);
+  assert.equal(maxUpdate.randomDeltaPct, 40 + offsetPct);
+  assert.equal(maxUpdate.fairPrice, 1_000 * (1 + (40 + offsetPct) / 100));
+});
+
+test("volatility drag offset is zero for a fixed rate and grows with the square of the delta range", () => {
+  assert.equal(volatilityDragOffsetPct(100, 100), 0);
+  assert.equal(volatilityDragOffsetPct(-0.5, 0.5), 1 / 2400);
+  assert.equal(volatilityDragOffsetPct(-5, 5), 100 / 2400);
 });
 
 test("fair price random delta percent is applied to previous fair price", () => {
@@ -115,22 +124,28 @@ test("fair price event move is preserved by the regular worker", () => {
   assert.equal(update.fairPriceChange, 0);
 });
 
-test("fair price event worker applies configured percent range", () => {
+test("fair price event worker applies configured percent range, shifted by the volatility-drag offset", () => {
+  const offsetPct = volatilityDragOffsetPct(-40, 40);
+
   const minWorker = new FairPriceEventWorker({ intervalMs: 30_000, minRatePct: -40, maxRatePct: 40 }, () => 0);
   const minUpdate = minWorker.update(1_000);
+  const minRate = -40 + offsetPct;
+  const minFairPrice = 1_000 * (1 + minRate / 100);
 
-  assert.equal(minUpdate.eventRatePct, -40);
-  assert.equal(minUpdate.fairPrice, 600);
-  assert.equal(minUpdate.fairPriceChange, -400);
-  assert.equal(minUpdate.fairPriceChangePct, -40);
+  assert.equal(minUpdate.eventRatePct, minRate);
+  assert.equal(minUpdate.fairPrice, minFairPrice);
+  assert.equal(minUpdate.fairPriceChange, minFairPrice - 1_000);
+  assert.equal(minUpdate.fairPriceChangePct, ((minFairPrice - 1_000) / 1_000) * 100);
 
   const maxWorker = new FairPriceEventWorker({ intervalMs: 30_000, minRatePct: -40, maxRatePct: 40 }, () => 1);
   const maxUpdate = maxWorker.update(1_000);
+  const maxRate = 40 + offsetPct;
+  const maxFairPrice = 1_000 * (1 + maxRate / 100);
 
-  assert.equal(maxUpdate.eventRatePct, 40);
-  assert.equal(maxUpdate.fairPrice, 1_400);
-  assert.equal(maxUpdate.fairPriceChange, 400);
-  assert.equal(maxUpdate.fairPriceChangePct, 40);
+  assert.equal(maxUpdate.eventRatePct, maxRate);
+  assert.equal(maxUpdate.fairPrice, maxFairPrice);
+  assert.equal(maxUpdate.fairPriceChange, maxFairPrice - 1_000);
+  assert.equal(maxUpdate.fairPriceChangePct, ((maxFairPrice - 1_000) / 1_000) * 100);
 });
 
 test("fair price can be replaced by the event worker result", () => {

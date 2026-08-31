@@ -1,4 +1,4 @@
-import { randomNumber } from "./math.js";
+import { randomNumber, volatilityDragOffsetPct } from "./math.js";
 import type { FairPriceConfig, Rng } from "../types.js";
 
 export interface FairPriceUpdate {
@@ -53,7 +53,14 @@ export class FairPriceWorker {
 
   update(currentPrice: number): FairPriceUpdate {
     const previousFairPrice = this.value;
-    const randomDeltaPct = randomNumber(this.config.randomDeltaMinPct, this.config.randomDeltaMaxPct, this.rng);
+    // Symmetric percent multipliers compound with a downward log-return bias (volatility drag);
+    // shift the draw up by variance/2 so repeated updates don't trend toward zero.
+    const offsetPct = volatilityDragOffsetPct(this.config.randomDeltaMinPct, this.config.randomDeltaMaxPct);
+    const randomDeltaPct = randomNumber(
+      this.config.randomDeltaMinPct + offsetPct,
+      this.config.randomDeltaMaxPct + offsetPct,
+      this.rng
+    );
     const nextFairPrice = Math.max(1, previousFairPrice * (1 + randomDeltaPct / 100));
     this.fairPrice = nextFairPrice;
     const fairPriceChange = nextFairPrice - previousFairPrice;
